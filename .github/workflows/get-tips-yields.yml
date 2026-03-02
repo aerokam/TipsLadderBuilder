@@ -8,7 +8,7 @@ name: Get TIPS Yields
 
 on:
   schedule:
-    - cron: '*/15 12-22 * * 1-5'   # ← change frequency here
+    - cron: '*/30 15-22 * * 1-5'   # ← change frequency here
   workflow_dispatch:                  # manual trigger
 
 jobs:
