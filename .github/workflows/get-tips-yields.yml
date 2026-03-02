@@ -1,8 +1,8 @@
 name: Get TIPS Yields
 
-# Bond market hours: 8am–5pm ET, Mon–Fri (non-holidays)
-# ET = UTC-5 (EST) or UTC-4 (EDT); use UTC 12:00–22:00 to cover both.
-# Adjust frequency below (currently every 15 minutes).
+# FedInvest prices available ~1pm–5pm ET, Mon–Fri (non-holidays)
+# ET = UTC-5 (EST) or UTC-4 (EDT); 18:00–22:00 UTC covers both.
+# Adjust frequency below (currently every 30 minutes).
 # Note: GitHub Actions cron cannot skip holidays — runs will produce no change
 #       on holidays since FedInvest returns no data; the commit step is a no-op.
 
