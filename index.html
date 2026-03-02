@@ -257,15 +257,32 @@ document.getElementById('run-btn').addEventListener('click', async () => {
   const method    = document.getElementById('method').value;
 
   const text = await fileInput.files[0].text();
-  const holdingsRaw = text.trim().split('\n')
-    .filter(l => l.trim())
-    .map(line => {
-      const [cusip, qty] = line.split(',').map(s => s.trim());
-      return { cusip, qty: parseInt(qty, 10) };
-    })
-    .filter(h => h.cusip && !isNaN(h.qty));
+  const rawLines = text.trim().split('\n').filter(l => l.trim());
+  if (rawLines.length === 0) { setStatus('Holdings CSV is empty.', true); return; }
 
-  if (holdingsRaw.length === 0) { setStatus('Holdings CSV appears empty or invalid.', true); return; }
+  // Detect and skip optional header row (first field not 9 alphanumeric chars)
+  const CUSIP_RE = /^[A-Z0-9]{9}$/i;
+  const startIdx = CUSIP_RE.test(rawLines[0].split(',')[0].trim()) ? 0 : 1;
+
+  const holdingsRaw = [];
+  for (let i = startIdx; i < rawLines.length; i++) {
+    const parts = rawLines[i].split(',').map(s => s.trim());
+    const lineNum = i + 1;
+    if (parts.length < 2) {
+      setStatus(`Row ${lineNum}: expected "cusip,qty" — got "${rawLines[i]}"`, true); return;
+    }
+    const [cusip, qtyStr] = parts;
+    if (!CUSIP_RE.test(cusip)) {
+      setStatus(`Row ${lineNum}: "${cusip}" is not a valid 9-character CUSIP`, true); return;
+    }
+    const qty = parseInt(qtyStr, 10);
+    if (isNaN(qty) || qty < 0) {
+      setStatus(`Row ${lineNum}: qty "${qtyStr}" must be a non-negative integer`, true); return;
+    }
+    holdingsRaw.push({ cusip, qty });
+  }
+
+  if (holdingsRaw.length === 0) { setStatus('Holdings CSV has no valid data rows.', true); return; }
 
   try {
     const settleDateStr = settlementDate.toLocaleDateString('en-CA');
