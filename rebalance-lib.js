@@ -1,32 +1,22 @@
 // TIPS Ladder Rebalancing — browser-compatible ES module
 // Pure computation only — no Node.js I/O, no file system, no CLI.
-//
-// Entry point:  runRebalance({ dara, method, holdings, tipsMap, refCPI, settlementDate })
-// Data loading: buildTipsMapFromYields(rows) — build tipsMap from TipsYields.csv rows
 
-// ─── Configuration ────────────────────────────────────────────────────────────
-export const LOWEST_LOWER_BRACKET_YEAR = 2032;
+import {
+  LOWEST_LOWER_BRACKET_YEAR,
+  localDate,
+  toDateStr,
+  fmtDate,
+  calculateMDuration,
+  calculatePIPerBond,
+  calculateGapParameters,
+  identifyBrackets
+} from './rebalance-engine.js';
 
-// ─── Date helpers ─────────────────────────────────────────────────────────────
-export function localDate(str) {
-  const [y, m, d] = str.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-export function toDateStr(date) {
-  return date.toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
-}
-
-export function fmtDate(date) {
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const y = String(date.getFullYear()).slice(2);
-  return `${m}/${d}/${y}`;
-}
-
-// ─── Build tipsMap from TipsYields.csv rows ───────────────────────────────────
-// Each row: { settlementDate, cusip, maturity (string), coupon, baseCpi, price, yield }
-// Returns Map keyed by CUSIP.
+/**
+ * Build tipsMap from TipsYields.csv rows
+ * @param {any[]} rows 
+ * @returns {Map<string, import('./rebalance-engine.js').TIPS_Bond>}
+ */
 export function buildTipsMapFromYields(rows) {
   const map = new Map();
   for (const r of rows) {
@@ -42,242 +32,16 @@ export function buildTipsMapFromYields(rows) {
   return map;
 }
 
-// ─── Yield from price (actual/actual, matches Excel YIELD(...,2,1)) ───────────
-export function yieldFromPrice(cleanPrice, coupon, settleDateStr, maturityStr) {
-  if (!cleanPrice || cleanPrice <= 0) return null;
-  const settle = localDate(settleDateStr);
-  const mature = localDate(maturityStr);
-  if (settle >= mature) return null;
-
-  const semiCoupon = (coupon / 2) * 100;
-  const matMon = mature.getMonth() + 1;
-  const cm1 = matMon <= 6 ? matMon : matMon - 6;
-  const cm2 = cm1 + 6;
-
-  function nextCouponOnOrAfter(d) {
-    const candidates = [];
-    for (let y = d.getFullYear() - 1; y <= d.getFullYear() + 1; y++) {
-      candidates.push(new Date(y, cm1 - 1, 15));
-      candidates.push(new Date(y, cm2 - 1, 15));
-    }
-    candidates.sort((a, b) => a - b);
-    return candidates.find(c => c >= d && c <= mature) || null;
-  }
-
-  const nextCoupon = nextCouponOnOrAfter(settle);
-  if (!nextCoupon) return null;
-  const lastCoupon = new Date(nextCoupon.getFullYear(), nextCoupon.getMonth() - 6, 15);
-
-  const days = (a, b) => (b - a) / 86400000;
-  const E = days(lastCoupon, nextCoupon);
-  const A = days(lastCoupon, settle);
-  const DSC = days(settle, nextCoupon);
-  const accrued = semiCoupon * (A / E);
-  const dirtyPrice = cleanPrice + accrued;
-  const w = DSC / E;
-
-  const coupons = [];
-  let d = new Date(nextCoupon);
-  while (d <= mature) {
-    coupons.push(new Date(d));
-    d = new Date(d.getFullYear(), d.getMonth() + 6, 15);
-  }
-  const N = coupons.length;
-  if (N === 0) return null;
-
-  function pv(y) {
-    const r = y / 2;
-    let s = 0;
-    for (let k = 0; k < N; k++) {
-      const cf = k === N - 1 ? semiCoupon + 100 : semiCoupon;
-      s += cf / Math.pow(1 + r, w + k);
-    }
-    return s;
-  }
-  function dpv(y) {
-    const r = y / 2;
-    let s = 0;
-    for (let k = 0; k < N; k++) {
-      const cf = k === N - 1 ? semiCoupon + 100 : semiCoupon;
-      s += (-cf * (w + k)) / (2 * Math.pow(1 + r, w + k + 1));
-    }
-    return s;
-  }
-
-  let y = coupon > 0.005 ? coupon : 0.02;
-  for (let i = 0; i < 200; i++) {
-    const diff = pv(y) - dirtyPrice;
-    if (Math.abs(diff) < 1e-10) break;
-    const deriv = dpv(y);
-    if (Math.abs(deriv) < 1e-15) break;
-    y -= diff / deriv;
-  }
-  return y;
-}
-
-// ─── Duration calculations ────────────────────────────────────────────────────
-export function getNumPeriods(settlement, maturity) {
-  const months = (maturity.getFullYear() - settlement.getFullYear()) * 12 +
-                 (maturity.getMonth() - settlement.getMonth());
-  return Math.ceil(months / 6);
-}
-
-export function calculateDuration(settlement, maturity, coupon, yld) {
-  const settle = new Date(settlement);
-  const mature = new Date(maturity);
-  const periods = getNumPeriods(settle, mature);
-  let weightedSum = 0, pvSum = 0;
-  for (let i = 1; i <= periods; i++) {
-    const cashflow = i === periods ? 1000 + coupon * 1000 / 2 : coupon * 1000 / 2;
-    const pv = cashflow / Math.pow(1 + yld / 2, i);
-    weightedSum += i * pv;
-    pvSum += pv;
-  }
-  return weightedSum / pvSum / 2;
-}
-
-export function calculateMDuration(settlement, maturity, coupon, yld) {
-  return calculateDuration(settlement, maturity, coupon, yld) / (1 + yld / 2);
-}
-
-// ─── P+I per bond ─────────────────────────────────────────────────────────────
-export function calculatePIPerBond(cusip, maturity, refCPI, tipsMap) {
-  const bond = tipsMap.get(cusip);
-  const coupon  = bond?.coupon  ?? 0;
-  const baseCpi = bond?.baseCpi ?? refCPI;
-  const indexRatio = refCPI / baseCpi;
-  const adjustedPrincipal = 1000 * indexRatio;
-  const adjustedAnnualInterest = adjustedPrincipal * coupon;
-  const monthF = new Date(maturity).getMonth() + 1;
-  const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
-  return adjustedPrincipal + lastYearInterest;
-}
-
-// ─── Gap parameters ───────────────────────────────────────────────────────────
-export function calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap, DARA, holdings) {
-  const holdingsByYear = {};
-  for (const h of holdings) {
-    if (!holdingsByYear[h.year]) holdingsByYear[h.year] = [];
-    holdingsByYear[h.year].push(h);
-  }
-
-  let laterMaturityFrom2041Plus = 0;
-  for (const year in holdingsByYear) {
-    if (parseInt(year) > 2040) {
-      for (const h of holdingsByYear[year]) {
-        const bond = tipsMap.get(h.cusip);
-        const coupon = bond?.coupon ?? 0;
-        const baseCpi = bond?.baseCpi ?? refCPI;
-        const indexRatio = refCPI / baseCpi;
-        laterMaturityFrom2041Plus += h.qty * 1000 * indexRatio * coupon;
-      }
-    }
-  }
-
-  const tips2040 = holdingsByYear[2040] ? holdingsByYear[2040][0] : null;
-  if (!tips2040) throw new Error('No holdings found for 2040');
-
-  const piPerBond2040 = calculatePIPerBond(tips2040.cusip, tips2040.maturity, refCPI, tipsMap);
-  const targetQty2040 = Math.round((DARA - laterMaturityFrom2041Plus) / piPerBond2040);
-
-  const bond2040 = tipsMap.get(tips2040.cusip);
-  const coupon2040 = bond2040?.coupon ?? 0;
-  const baseCpi2040 = bond2040?.baseCpi ?? refCPI;
-  const indexRatio2040 = refCPI / baseCpi2040;
-  const annualInterest2040 = targetQty2040 * 1000 * indexRatio2040 * coupon2040;
-
-  const gapLaterMaturityInterest = { 2040: annualInterest2040 };
-  for (const year in holdingsByYear) {
-    if (parseInt(year) > 2040) {
-      gapLaterMaturityInterest[year] = 0;
-      for (const h of holdingsByYear[year]) {
-        const bond = tipsMap.get(h.cusip);
-        const coupon = bond?.coupon ?? 0;
-        const baseCpi = bond?.baseCpi ?? refCPI;
-        const indexRatio = refCPI / baseCpi;
-        gapLaterMaturityInterest[year] += h.qty * 1000 * indexRatio * coupon;
-      }
-    }
-  }
-
-  const minGapYear = Math.min(...gapYears);
-  const maxGapYear = Math.max(...gapYears);
-  let anchorBefore = null, anchorAfter = null;
-
-  for (const bond of tipsMap.values()) {
-    if (!bond.maturity || !bond.yield) continue;
-    const year  = bond.maturity.getFullYear();
-    const month = bond.maturity.getMonth() + 1;
-    if (year === minGapYear - 1 && month === 1) {
-      anchorBefore = { maturity: bond.maturity, yield: bond.yield };
-    }
-    if (year === maxGapYear + 1 && month === 2) {
-      anchorAfter = { maturity: bond.maturity, yield: bond.yield };
-    }
-  }
-  if (!anchorBefore || !anchorAfter) throw new Error('Could not find interpolation anchors for gap years');
-
-  let totalDuration = 0, totalCost = 0, count = 0;
-  for (const year of [...gapYears].sort((a, b) => b - a)) {
-    const syntheticMat = new Date(year, 1, 15);
-    const syntheticYield = anchorBefore.yield +
-      (syntheticMat - anchorBefore.maturity) * (anchorAfter.yield - anchorBefore.yield) /
-      (anchorAfter.maturity - anchorBefore.maturity);
-    const syntheticCoupon = Math.max(0.00125, Math.floor(syntheticYield * 100 / 0.125) * 0.00125);
-
-    totalDuration += calculateMDuration(settlementDate, syntheticMat, syntheticCoupon, syntheticYield);
-
-    let sumLaterMaturityInterest = 0;
-    for (const futYear in gapLaterMaturityInterest) {
-      if (parseInt(futYear) > year) sumLaterMaturityInterest += gapLaterMaturityInterest[futYear];
-    }
-
-    const piPerBond = 1000 + 1000 * syntheticCoupon * 0.5;
-    const qty = Math.round((DARA - sumLaterMaturityInterest) / piPerBond);
-    totalCost += qty * 1000;
-    count++;
-  }
-
-  return { avgDuration: totalDuration / count, totalCost };
-}
-
-// ─── Identify brackets ────────────────────────────────────────────────────────
-export function identifyBrackets(gapYears, holdings, yearInfo) {
-  const upperYear = 2040;
-  let upperMaturity = null, upperCUSIP = null, maxQty = 0;
-  if (yearInfo[upperYear]) {
-    for (const h of yearInfo[upperYear].holdings) {
-      if (h.qty > maxQty) { maxQty = h.qty; upperMaturity = h.maturity; upperCUSIP = h.cusip; }
-    }
-  }
-
-  const minGapYear = Math.min(...gapYears);
-  let lowerYear = null, lowerMaturity = null, lowerCUSIP = null;
-  maxQty = 0;
-
-  for (const h of holdings) {
-    if (h.year >= LOWEST_LOWER_BRACKET_YEAR && h.year < minGapYear && h.qty > maxQty) {
-      maxQty = h.qty; lowerYear = h.year; lowerMaturity = h.maturity; lowerCUSIP = h.cusip;
-    }
-  }
-
-  if (!lowerYear) {
-    throw new Error(`Could not find lower bracket between ${LOWEST_LOWER_BRACKET_YEAR} and ${minGapYear - 1}`);
-  }
-
-  return { lowerYear, lowerMaturity, lowerCUSIP, upperYear, upperMaturity, upperCUSIP };
-}
-
-// ─── Main rebalance engine ────────────────────────────────────────────────────
-// Inputs:
-//   dara           — number or null (null → infer from holdings)
-//   method         — 'Gap' or 'Full'
-//   holdings       — [{ cusip, qty }]  (raw from CSV upload)
-//   tipsMap        — Map from buildTipsMapFromYields()
-//   refCPI         — number (from RefCPI.csv, keyed to settlement date)
-//   settlementDate — Date (from TipsYields.csv settlementDate field)
-//
-// Returns: { results, HDR, summary }
+/**
+ * @param {{
+ *  dara: number|null,
+ *  method: 'Gap'|'Full',
+ *  holdings: any[],
+ *  tipsMap: Map<string, import('./rebalance-engine.js').TIPS_Bond>,
+ *  refCPI: number,
+ *  settlementDate: Date
+ * }} params
+ */
 export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
   const settleDateStr  = toDateStr(settlementDate);
   const settleDateDisp = fmtDate(settlementDate);
@@ -297,7 +61,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       year:     bond.maturity.getFullYear(),
     });
   }
-  holdings.sort((a, b) => a.maturity - b.maturity);
+  holdings.sort((a, b) => a.maturity.getTime() - b.maturity.getTime());
 
   // Build yearInfo
   const yearInfo = {};
@@ -337,8 +101,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
 
   for (const year of allYearsSorted) {
     let laterMatInt = 0;
-    for (const y in araLaterMaturityInterestByYear) {
-      if (parseInt(y) > year) laterMatInt += araLaterMaturityInterestByYear[y];
+    for (const yStr in araLaterMaturityInterestByYear) {
+      if (parseInt(yStr) > year) laterMatInt += araLaterMaturityInterestByYear[yStr];
     }
     let yearPrincipal = 0, yearLastYearInterest = 0;
     araLaterMaturityInterestByYear[year] = 0;
@@ -349,7 +113,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       const indexRatio = refCPI / baseCpi;
       const adjustedPrincipal = 1000 * indexRatio;
       const adjustedAnnualInterest = adjustedPrincipal * coupon;
-      const monthF = holding.maturity.getMonth() + 1;
+      const monthF = (holding.maturity?.getMonth() ?? 0) + 1;
       const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
       yearPrincipal += holding.qty * adjustedPrincipal;
       yearLastYearInterest += holding.qty * lastYearInterest;
@@ -387,13 +151,13 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   const minGapYear     = Math.min(...gapYears);
 
   const bracketTargetFYQtyBefore = {};
-  for (const [bracketYear, bracketCUSIP, bracketMaturity] of [
+  for (const [bracketYear, bracketCUSIP, bracketMaturity] of /** @type {const} */ ([
     [brackets.lowerYear, brackets.lowerCUSIP, brackets.lowerMaturity],
     [brackets.upperYear, brackets.upperCUSIP, brackets.upperMaturity],
-  ]) {
+  ])) {
     let laterMatIntBefore = 0;
-    for (const y in araLaterMaturityInterestByYear) {
-      if (parseInt(y) > bracketYear) laterMatIntBefore += araLaterMaturityInterestByYear[y];
+    for (const yStr in araLaterMaturityInterestByYear) {
+      if (parseInt(yStr) > bracketYear) laterMatIntBefore += araLaterMaturityInterestByYear[yStr];
     }
     const yh = yearInfo[bracketYear].holdings;
     let tFYQty;
@@ -448,6 +212,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     for (const h of yi.holdings) {
       if (h.qty > maxQty) { maxQty = h.qty; targetCUSIP = h.cusip; targetMaturity = h.maturity; }
     }
+
+    if (!targetCUSIP || !targetMaturity) continue;
 
     const targetBondR  = tipsMap.get(targetCUSIP);
     const tPrice       = targetBondR?.price ?? 0;
@@ -506,8 +272,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   const beforeARAByYear = {};
   for (const year of allYearsSorted) {
     let laterMatInt = 0;
-    for (const y in araLaterMaturityInterestByYear) {
-      if (parseInt(y) > year) laterMatInt += araLaterMaturityInterestByYear[y];
+    for (const yStr in araLaterMaturityInterestByYear) {
+      if (parseInt(yStr) > year) laterMatInt += araLaterMaturityInterestByYear[yStr];
     }
     let yearPrincipal = 0, yearLastYearInterest = 0;
     for (const holding of yearInfo[year].holdings) {
@@ -517,7 +283,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       const indexRatio = refCPI / baseCpi;
       const adjustedPrincipal = 1000 * indexRatio;
       const adjustedAnnualInterest = adjustedPrincipal * coupon;
-      const monthF = holding.maturity.getMonth() + 1;
+      const monthF = (holding.maturity?.getMonth() ?? 0) + 1;
       const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
       const isBracketTarget = bracketYearSet.has(year) && holding.cusip === buySellTargets[year]?.targetCUSIP;
       const qtyForARA = isBracketTarget ? bracketTargetFYQtyBefore[year] : holding.qty;
@@ -539,7 +305,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       const indexRatio = refCPI / baseCpi;
       const adjustedPrincipal = 1000 * indexRatio;
       const adjustedAnnualInterest = adjustedPrincipal * coupon;
-      const monthF = holding.maturity.getMonth() + 1;
+      const monthF = (holding.maturity?.getMonth() ?? 0) + 1;
       const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
       const bt = buySellTargets[year];
       let qtyForARA;
@@ -563,8 +329,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     const isLastInYear = (yearInfo[h.year].lastIdx === i);
 
     let sumLaterMaturityAnnualInterest = 0;
-    for (const year in outputLaterMaturityInterest) {
-      if (parseInt(year) > h.year) sumLaterMaturityAnnualInterest += outputLaterMaturityInterest[year];
+    for (const yearStr in outputLaterMaturityInterest) {
+      if (parseInt(yearStr) > h.year) sumLaterMaturityAnnualInterest += outputLaterMaturityInterest[yearStr];
     }
 
     let fy = '', principalFY = '', interestFY = '', araFY = '', costFY = '';
@@ -582,7 +348,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
         const adjustedPrincipal = 1000 * indexRatio;
         yearPrincipal += holding.qty * adjustedPrincipal;
         const adjustedAnnualInterest = adjustedPrincipal * coupon;
-        const monthF = holding.maturity.getMonth() + 1;
+        const monthF = (holding.maturity?.getMonth() ?? 0) + 1;
         const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
         yearLastYearInterest += holding.qty * lastYearInterest;
         yearCost += holding.qty * (price / 100 * indexRatio * 1000);
@@ -642,7 +408,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
 
   const lowerCurrentExcess = buySellTargets[brackets.lowerYear].currentExcessCost;
   const upperCurrentExcess = buySellTargets[brackets.upperYear].currentExcessCost;
-  const totalCurrentExcess = lowerCurrentExcess + upperCurrentExcess;
+  const totalCurrentExcess = (lowerCurrentExcess ?? 0) + (upperCurrentExcess ?? 0);
 
   const lowerPostQty     = buySellTargets[brackets.lowerYear].postRebalQty;
   const upperPostQty     = buySellTargets[brackets.upperYear].postRebalQty;
@@ -654,8 +420,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   const upperExcessCost  = upperExcessQty * upperCostPerBond;
   const totalExcessCost  = lowerExcessCost + upperExcessCost;
 
-  const beforeLowerWeight = totalCurrentExcess > 0 ? lowerCurrentExcess / totalCurrentExcess : null;
-  const beforeUpperWeight = totalCurrentExcess > 0 ? upperCurrentExcess / totalCurrentExcess : null;
+  const beforeLowerWeight = (totalCurrentExcess > 0 && lowerCurrentExcess !== undefined) ? lowerCurrentExcess / totalCurrentExcess : null;
+  const beforeUpperWeight = (totalCurrentExcess > 0 && upperCurrentExcess !== undefined) ? upperCurrentExcess / totalCurrentExcess : null;
   const afterLowerWeight  = totalExcessCost   > 0 ? lowerExcessCost   / totalExcessCost   : null;
   const afterUpperWeight  = totalExcessCost   > 0 ? upperExcessCost   / totalExcessCost   : null;
 
