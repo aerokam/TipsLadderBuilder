@@ -192,40 +192,26 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
     </div>
     <div id="status"></div>
   </div>
-</div>
-
-<!-- Rebalance output -->
-<div id="output">
   <div id="net-cash-bar">
     <div class="nc-label">Net Cash</div>
     <div class="nc-val" id="net-cash-val"></div>
   </div>
-  <div class="params-bar" id="params-bar"></div>
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="simple">Simple</button>
-    <button class="tab-btn" data-tab="detail">Detail</button>
+  <div id="bfs-net-cash-bar">
+    <div class="nc-label">Total Cost</div>
+    <div class="nc-val" id="bfs-net-cash-val"></div>
   </div>
-  <div class="tab-panels">
-    <div class="tab-panel active" id="tab-simple">
-      <div class="table-wrap" style="padding:12px 16px">
-        <table class="simple" id="simple-table"></table>
-      </div>
-    </div>
-    <div class="tab-panel" id="tab-detail">
-      <div class="detail-bar" id="detail-bar"></div>
-      <div class="table-wrap">
-        <table class="main" id="main-table"></table>
-      </div>
-    </div>
+</div>
+
+<!-- Rebalance output -->
+<div id="output">
+  <div class="params-bar" id="params-bar"></div>
+  <div class="table-wrap" style="padding:12px 16px">
+    <table class="simple" id="simple-table"></table>
   </div>
 </div>
 
 <!-- Build from Scratch output -->
 <div id="bfs-output">
-  <div id="bfs-net-cash-bar">
-    <div class="nc-label">Total Cost</div>
-    <div class="nc-val" id="bfs-net-cash-val"></div>
-  </div>
   <div class="params-bar" id="bfs-params-bar"></div>
   <div style="border:1px solid #ddd; border-radius:6px; background:#fff; overflow-x:auto; padding:12px 16px;">
     <table class="simple" id="bfs-table"></table>
@@ -371,6 +357,7 @@ function cell(v, ci) {
 let currentMode = 'rebalance';
 let rebalanceRendered = false, bfsRendered = false;
 let bfsDetails = null;
+let rebalDetails = null;
 
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -398,18 +385,8 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
   });
 });
 
-// ─── Tab switching ────────────────────────────────────────────────────────────
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
-});
-
 // ─── Render rebalance output ──────────────────────────────────────────────────
-function renderOutput({ results, HDR, summary }) {
+function renderOutput({ results, HDR, summary, details }) {
   const {
     settleDateDisp, refCPI, DARA, inferredDARA, method,
     firstYear, lastYear, rungCount, gapYears,
@@ -438,75 +415,62 @@ function renderOutput({ results, HDR, summary }) {
     param('Range',         `${firstYear} – ${lastYear} (${rungCount} rungs)`) +
     param('Gap Years',     gapYears.join(', ') || '—');
 
-  const dp  = (label, val) =>
-    `<div class="param"><span class="param-label">${label}</span><span class="param-val">${val}</span></div>`;
-  const wpct = n => typeof n === 'number' ? Math.round(n * 100) + '%' : 'N/A';
-  const grp  = (...items) => `<div class="param-group">${items.join('')}</div>`;
+  rebalDetails = details;
 
-  document.getElementById('detail-bar').innerHTML =
-    grp(
-      dp('Gap Avg Dur',                       gapParams.avgDuration.toFixed(1)),
-      dp(`Lower Dur (${brackets.lowerYear})`, lowerDuration.toFixed(1)),
-      dp(`Upper Dur (${brackets.upperYear})`, upperDuration.toFixed(1)),
-    ) +
-    grp(
-      dp('Gap Total Cost', fmtI(gapParams.totalCost)),
-      dp('Excess Before',  fmtI(totalCurrentExcess)),
-      dp('Excess After',   fmtI(totalExcessCost)),
-    ) +
-    grp(
-      dp('Lower Wt Target/Before/After', `${wpct(lowerWeight)} / ${wpct(beforeLowerWeight)} / ${wpct(afterLowerWeight)}`),
-      dp('Upper Wt Target/Before/After', `${wpct(upperWeight)} / ${wpct(beforeUpperWeight)} / ${wpct(afterUpperWeight)}`),
-    );
-
-  const tableEl  = document.getElementById('main-table');
-  const headerRow = `<thead><tr>${HDR.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>`;
-  const bodyRows  = results.map(r => '<tr>' + r.map((v, ci) => cell(v, ci)).join('') + '</tr>').join('\n');
-  tableEl.innerHTML = headerRow + `<tbody>${bodyRows}</tbody>`;
-
-  tableEl.querySelectorAll('tbody tr').forEach(tr => {
-    [9, 11].forEach(ci => {
-      const td = tr.cells[ci];
-      if (!td) return;
-      const v = parseFloat(td.textContent.replace(/,/g, ''));
-      if (!isNaN(v) && v !== 0) td.classList.add(v > 0 ? 'pos' : 'neg');
-    });
-  });
-
-  // Simple view — HDR: 0=CUSIP 1=Qty 2=Maturity 3=FY 8=Target Qty 9=Qty Delta 11=Cost Delta
-  const SIMPLE_COLS = [
-    { label: 'CUSIP',    ci: 0 },
-    { label: 'Maturity', ci: 2 },
-    { label: 'FY',       ci: 3 },
-    { label: 'Qty',      ci: 1 },
-    { label: 'Target',   ci: 8 },
-    { label: 'Delta',    ci: 9 },
-    { label: 'Cash Δ',   ci: 11 },
+  // Simple view: CUSIP | Maturity | FY | ARA After | ARA Before | Excess After | Excess Before | Qty After | Qty Before | QtyΔ | CashΔ
+  const SCOLS = [
+    { label: 'CUSIP',         ci: 0,  fmt: 'str' },
+    { label: 'Maturity',      ci: 2,  fmt: 'str' },
+    { label: 'FY',            ci: 3,  fmt: 'fy'  },
+    { label: 'ARA After',     ci: 14, fmt: 'amt', key: 'araAfter'     },
+    { label: 'ARA Before',    ci: 12, fmt: 'amt', key: 'araBefore'    },
+    { label: 'Excess After',  ci: 17, fmt: 'amt', key: 'excessAfter'  },
+    { label: 'Excess Before', ci: 16, fmt: 'amt', key: 'excessBefore' },
+    { label: 'Qty After',     ci: 8,  fmt: 'qty', key: 'qtyAfter'     },
+    { label: 'Qty Before',    ci: 1,  fmt: 'qty' },
+    { label: 'Qty Δ',        ci: 9,  fmt: 'sgn' },
+    { label: 'Cash Δ',       ci: 11, fmt: 'sgn', key: 'cashDelta' },
   ];
-  const simpleEl     = document.getElementById('simple-table');
-  const simpleHeader = `<thead><tr>${SIMPLE_COLS.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr></thead>`;
-  const simpleBody   = results.map(r => {
-    const delta    = r[9];
-    const noChange = typeof delta === 'number' && delta === 0;
-    const cells    = SIMPLE_COLS.map(({ ci }) => {
-      const v = r[ci];
-      let s;
-      if (typeof v !== 'number') {
-        s = String(v);
-      } else if (ci === 1 || ci === 3 || ci === 8) {
-        s = String(Math.round(v));
-      } else {
-        const rounded = Math.round(v);
-        s = (ci === 9 || ci === 11) && rounded > 0 ? '+' + rounded.toLocaleString('en-US')
-          : rounded.toLocaleString('en-US');
+  const simpleEl = document.getElementById('simple-table');
+  const simpleHeader = '<thead><tr>' + SCOLS.map(c => '<th>' + esc(c.label) + '</th>').join('') + '</tr></thead>';
+  const simpleBody = results.map((r, ri) => {
+    const noChange = typeof r[9] === 'number' && r[9] === 0;
+    const d = details[ri];
+    const cells = SCOLS.map(({ ci, fmt, key }) => {
+      let v = (ci === 8 && r[8] === '') ? r[1] : r[ci];
+      let s = '', cls = '';
+      if (fmt === 'str') {
+        s = String(v ?? '');
+      } else if (fmt === 'fy') {
+        s = v === '' ? '' : String(v);
+      } else if (fmt === 'qty') {
+        s = typeof v === 'number' ? String(Math.round(v)) : String(v ?? '');
+      } else if (fmt === 'sgn') {
+        if (typeof v === 'number') {
+          const r2 = Math.round(v);
+          s = r2 > 0 ? '+' + r2.toLocaleString('en-US') : r2.toLocaleString('en-US');
+          if (v !== 0) cls = v > 0 ? 'pos' : 'neg';
+        }
+      } else { // amt
+        s = typeof v === 'number' ? Math.round(v).toLocaleString('en-US') : String(v ?? '');
       }
-      let cls = '';
-      if ((ci === 9 || ci === 11) && typeof v === 'number' && v !== 0) cls = v > 0 ? ' class="pos"' : ' class="neg"';
-      return `<td${cls}>${esc(s)}</td>`;
+      const clickable = key && d && (
+        (key === 'araAfter'     && d.araAfterTotal   !== null) ||
+        (key === 'araBefore'    && d.araBeforeTotal  !== null) ||
+        (key === 'excessAfter'  && d.isBracketTarget && d.excessQtyAfter  > 0) ||
+        (key === 'excessBefore' && d.isBracketTarget && d.excessQtyBefore > 0) ||
+        (key === 'qtyAfter'     && typeof v === 'number' && v > 0) ||
+        (key === 'cashDelta'   && typeof v === 'number' && v !== 0)
+      );
+      const drillCls = clickable
+        ? ' class="drillable' + (cls ? ' ' + cls : '') + '" data-row="' + ri + '" data-col="' + key + '"'
+        : (cls ? ' class="' + cls + '"' : '');
+      const align = fmt !== 'str' ? ' style="text-align:right"' : '';
+      return '<td' + drillCls + align + '>' + esc(s) + '</td>';
     }).join('');
-    return `<tr class="${noChange ? 'no-change' : ''}">${cells}</tr>`;
+    return '<tr class="' + (noChange ? 'no-change' : '') + '">' + cells + '</tr>';
   }).join('\n');
-  simpleEl.innerHTML = simpleHeader + `<tbody>${simpleBody}</tbody>`;
+  simpleEl.innerHTML = simpleHeader + '<tbody>' + simpleBody + '</tbody>';
 
   rebalanceRendered = true;
   document.getElementById('output').style.display = 'block';
@@ -812,6 +776,145 @@ let _drillDragging = false;
     if (_drillDragging) setTimeout(() => { _drillDragging = false; }, 0);
   });
 }
+
+
+// ─── Rebalance drill-down ────────────────────────────────────────────────────────────────────────────────
+function buildRebalDrillHTML(d, colKey) {
+  const fm  = n => '$' + Math.round(n).toLocaleString('en-US');
+  const fm2 = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fd  = (n, dp) => Number(n).toFixed(dp);
+  const RM  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const matMonth  = RM[parseInt(d.maturityStr.slice(0,2), 10) - 1];
+  const couponPct = fd(d.coupon / 2 * 100, 5) + '%';
+  const nPerLbl   = d.nPeriods === 1 ? '1 semi-annual' : '2 (Jan + ' + matMonth + ')';
+
+  function row(label, formula, value, isTotal) {
+    const ts = isTotal ? 'font-weight:700;border-top:2px solid #1e293b;padding-top:6px;' : '';
+    const f  = formula
+      ? '<td style="padding:3px 14px;color:#64748b;font-size:11px;' + ts + '">' + formula + '</td>'
+      : '<td style="padding:3px 14px;' + ts + '"></td>';
+    return '<tr>'
+      + '<td style="padding:3px 16px 3px 0;white-space:nowrap;' + ts + '">' + label + '</td>'
+      + f
+      + '<td style="padding:3px 0 3px 14px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;' + ts + '">' + value + '</td>'
+      + '</tr>';
+  }
+  function sep() { return '<tr><td colspan="3" style="padding:4px 0;border-bottom:1px dashed #e2e8f0"></td></tr>'; }
+  function bondVarRows() {
+    return row('refCPI', '', fd(d.refCPI, 5))
+      + row('Dated date CPI', '', fd(d.baseCpi, 5))
+      + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
+      + row('Principal per bond', '1,000 × index ratio', fd(d.principalPerBond, 2))
+      + row('Coupon per period', 'annual coupon / 2', couponPct)
+      + row('Coupon periods in FY', '', nPerLbl);
+  }
+
+  let rows = '';
+  if (colKey === 'araBefore' || colKey === 'araAfter') {
+    const isBef       = colKey === 'araBefore';
+    const principal   = isBef ? d.araBeforePrincipal   : d.araAfterPrincipal;
+    const ownCoupon   = isBef ? d.araBeforeOwnCoupon   : d.araAfterOwnCoupon;
+    const laterMatInt = isBef ? d.araBeforeLaterMatInt : d.araAfterLaterMatInt;
+    const araTotal    = isBef ? d.araBeforeTotal       : d.araAfterTotal;
+    const couponLabel = d.nPeriods === 1 ? 'Last coupon (1 period)' : 'Last 2 coupons (2 periods)';
+    const araQty = isBef ? d.qtyBefore : d.qtyAfter;
+    rows = bondVarRows() + sep()
+      + row('Qty', '', araQty + ' bonds')
+      + row('Principal', 'principal/bond × qty', fm(principal))
+      + row(couponLabel, 'principal/bond × coupon/period × periods × qty', fm(ownCoupon))
+      + row('Later maturity interest', 'from bonds maturing after FY', fm(laterMatInt))
+      + sep()
+      + row(isBef ? 'ARA Before' : 'ARA After', 'Principal + Coupons + Later mat int', fm(araTotal), true)
+      + sep()
+      + row('DARA', '', fm(d.DARA))
+      + row('Surplus / Deficit', (isBef ? 'ARA Before' : 'ARA After') + ' − DARA',
+            (araTotal - d.DARA >= 0 ? '+' : '') + Math.round(araTotal - d.DARA).toLocaleString('en-US'));
+
+  } else if (colKey === 'excessBefore' || colKey === 'excessAfter') {
+    const isBef = colKey === 'excessBefore';
+    const exQty = isBef ? d.excessQtyBefore  : d.excessQtyAfter;
+    const exCost= isBef ? d.excessCostBefore : d.excessCostAfter;
+    rows = bondVarRows() + sep()
+      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
+      + row('Excess qty', isBef ? 'current total − FY target (before)' : 'post-rebal total − FY target', exQty + ' bonds')
+      + sep()
+      + row(isBef ? 'Excess Cost Before' : 'Excess Cost After', 'cost/bond × excess qty', fm(exCost), true);
+
+  } else if (colKey === 'qtyAfter') {
+    const totalQty = d.qtyAfter;
+    rows = bondVarRows() + sep()
+      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond));
+    if (d.isBracketTarget) {
+      rows += sep()
+        + row('FY target qty', 'from rebalance algorithm', d.fyQty + ' bonds')
+        + row('Excess cost to deploy', '', fm(d.excessCostAfter))
+        + row('Cost per bond', '', fm2(d.costPerBond))
+        + row('Excess bonds', 'round(excess cost ÷ cost per bond)', d.excessQtyAfter + ' bonds')
+        + sep()
+        + row('Total qty', 'FY target + excess bonds', totalQty + ' bonds', true);
+    } else if (d.qtyAfter !== d.qtyBefore) {
+      const piPB = d.principalPerBond * (1 + d.coupon / 2 * d.nPeriods);
+      const lmi  = d.araAfterLaterMatInt ?? 0;
+      const net  = d.DARA - lmi;
+      rows = row('refCPI', '', fd(d.refCPI, 5))
+        + row('Dated date CPI', '', fd(d.baseCpi, 5))
+        + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
+        + row('Principal per bond', '1,000 × index ratio', fd(d.principalPerBond, 2))
+        + row('Coupon per period', 'annual coupon / 2', couponPct)
+        + row('Coupon periods in FY', '', nPerLbl)
+        + sep()
+        + row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(piPB))
+        + sep()
+        + row('DARA', '', fm(d.DARA))
+        + row('Later mat int', 'from bonds maturing after FY', fm(lmi))
+        + row('Net needed', 'DARA − Later mat int', fm(net))
+        + sep()
+        + row('Target FY qty', 'round(Net needed ÷ P+I per bond)', totalQty + ' bonds', true);
+    } else {
+      rows += sep()
+        + row('Qty', 'unchanged from current holdings', totalQty + ' bonds', true);
+    }
+  }
+
+  if (colKey === 'cashDelta') {
+    const qtyDelta  = d.qtyAfter - d.qtyBefore;
+    const cashDelta = -(qtyDelta * d.costPerBond);
+    const qdSign    = qtyDelta >= 0 ? '+' : '';
+    const cdSign    = cashDelta >= 0 ? '+' : '';
+    rows = ''
+      + row('Price (unadjusted)', '', fd(d.price, 4))
+      + row('refCPI', '', fd(d.refCPI, 5))
+      + row('Dated date CPI', '', fd(d.baseCpi, 5))
+      + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
+      + sep()
+      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
+      + sep()
+      + row('Qty delta', 'Qty After − Qty Before', qdSign + qtyDelta + ' bonds')
+      + sep()
+      + row('Cash Δ', '−(Qty delta × cost/bond)', cdSign + fm(Math.abs(cashDelta)), true);
+  }
+
+  return '<table style="border-collapse:collapse;width:100%;font-size:12px">' + rows + '</table>';
+}
+
+document.getElementById('simple-table').addEventListener('click', e => {
+  const td = e.target.closest('td.drillable');
+  if (!td || !rebalDetails) return;
+  const ri  = parseInt(td.dataset.row, 10);
+  const key = td.dataset.col;
+  const d   = rebalDetails[ri];
+  if (!d) return;
+  const colNames = { araBefore: 'ARA Before', araAfter: 'ARA After',
+    excessBefore: 'Excess Before', excessAfter: 'Excess After',
+    qtyBefore: 'Qty Before', qtyAfter: 'Qty After', cashDelta: 'Cash Δ' };
+  document.getElementById('drill-title').textContent =
+    colNames[key] + ' — FY ' + d.fy + ' · ' + d.cusip + ' · ' + d.maturityStr;
+  document.getElementById('drill-content').innerHTML = buildRebalDrillHTML(d, key);
+  const _ov = document.getElementById('drill-overlay');
+  const _dm = document.getElementById('drill-modal');
+  _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';
+  _ov.style.display = 'block';
+});
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 loadData();

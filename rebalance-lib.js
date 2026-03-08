@@ -547,6 +547,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
 
   // Before ARA
   const beforeARAByYear = {};
+  const beforeARACompByYear = {};
   for (const year of allYearsSorted) {
     let laterMatInt = 0;
     for (const y in araLaterMaturityInterestByYear) {
@@ -568,10 +569,12 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       yearLastYearInterest += qtyForARA * lastYearInterest;
     }
     beforeARAByYear[year] = yearPrincipal + yearLastYearInterest + laterMatInt;
+    beforeARACompByYear[year] = { principal: yearPrincipal, ownCoupon: yearLastYearInterest, laterMatInt };
   }
 
   // After ARA
   const postARAByYear = {};
+  const afterARACompByYear = {};
   for (const year of allYearsSorted) {
     const laterMatInt = yearLaterMatIntSnapshot[year] ?? 0;
     let yearPrincipal = 0, yearLastYearInterest = 0;
@@ -595,10 +598,12 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       yearLastYearInterest += qtyForARA * lastYearInterest;
     }
     postARAByYear[year] = yearPrincipal + yearLastYearInterest + laterMatInt;
+    afterARACompByYear[year] = { principal: yearPrincipal, ownCoupon: yearLastYearInterest, laterMatInt };
   }
 
   // Build result rows
   const results = [];
+  const details = [];
   const outputLaterMaturityInterest = {};
 
   for (let i = holdings.length - 1; i >= 0; i--) {
@@ -668,8 +673,50 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     if (!outputLaterMaturityInterest[h.year]) outputLaterMaturityInterest[h.year] = 0;
     outputLaterMaturityInterest[h.year] += h.qty * 1000 * indexRatio * coupon;
 
-    results.unshift([
-      h.cusip, h.qty, fmtDate(h.maturity), fy,
+    // ── Detail for drill-down ──────────────────────────────────────────────────
+        {
+          const dBond    = tipsMap.get(h.cusip);
+          const dCoupon  = dBond?.coupon  ?? 0;
+          const dPrice   = dBond?.price   ?? 0;
+          const dBase    = dBond?.baseCpi ?? refCPI;
+          const dIR      = Math.round(refCPI / dBase * 1e5) / 1e5;
+          const dPPB     = 1000 * dIR;
+          const dCPB     = dPrice / 100 * dIR * 1000;
+          const dMonthF  = h.maturity.getMonth() + 1;
+          const dNPer    = dMonthF < 7 ? 1 : 2;
+          const dBT      = buySellTargets[h.year];
+          const dIsBT    = !!(dBT?.isBracket && h.cusip === dBT.targetCUSIP);
+          const dIsTarget= !!(dBT && h.cusip === dBT.targetCUSIP);
+          const dIsNTS   = !!nonTargetSells[h.cusip];
+          const dQtyAfter   = dIsTarget ? dBT.postRebalQty : dIsNTS ? nonTargetSells[h.cusip].newQty : h.qty;
+          const dFYQty      = dIsTarget ? dBT.targetFYQty  : dIsNTS ? nonTargetSells[h.cusip].newQty : h.qty;
+          const dExQtyBef   = dIsBT ? h.qty - bracketTargetFYQtyBefore[h.year] : 0;
+          const dExQtyAft   = dIsBT ? dBT.postRebalQty - dBT.targetFYQty : 0;
+          const dLast       = isLastInYear;
+          const dBComp      = dLast ? beforeARACompByYear[h.year] : null;
+          const dAComp      = dLast ? afterARACompByYear[h.year]  : null;
+          details.unshift({
+            cusip: h.cusip, maturityStr: fmtDate(h.maturity), fy: h.year,
+            nPeriods: dNPer, isLastInYear: dLast, isBracketTarget: dIsBT,
+            coupon: dCoupon, price: dPrice, baseCpi: dBase, refCPI, indexRatio: dIR,
+            principalPerBond: dPPB, costPerBond: dCPB,
+            qtyBefore: h.qty, qtyAfter: dQtyAfter, fyQty: dFYQty,
+            excessQtyBefore: dExQtyBef, excessQtyAfter: dExQtyAft,
+            excessCostBefore: dIsBT ? dBT.currentExcessCost : 0,
+            excessCostAfter:  dIsBT ? dExQtyAft * dCPB : 0,
+            DARA,
+            araBeforePrincipal:   dBComp?.principal   ?? null,
+            araBeforeOwnCoupon:   dBComp?.ownCoupon   ?? null,
+            araBeforeLaterMatInt: dBComp?.laterMatInt ?? null,
+            araBeforeTotal:       dLast ? beforeARAByYear[h.year] : null,
+            araAfterPrincipal:    dAComp?.principal   ?? null,
+            araAfterOwnCoupon:    dAComp?.ownCoupon   ?? null,
+            araAfterLaterMatInt:  dAComp?.laterMatInt ?? null,
+            araAfterTotal:        dLast ? postARAByYear[h.year]   : null,
+          });
+        }
+        results.unshift([
+          h.cusip, h.qty, fmtDate(h.maturity), fy,
       principalFY, interestFY, araFY, costFY,
       targetQty, qtyDelta, targetCost, costDelta,
       araBeforeFY, araMinusDaraBefore, araAfterFY, araMinusDaraAfter,
@@ -723,5 +770,5 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     costDeltaSum,
   };
 
-  return { results, HDR, summary };
+  return { results, HDR, summary, details };
 }
