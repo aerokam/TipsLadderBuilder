@@ -661,11 +661,10 @@ function buildDrillHTML(d, colIdx) {
   const DRILL_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const matMonth = DRILL_MONTHS[parseInt(d.maturityStr.slice(0,2), 10) - 1];
   function bondVarRows(qty) {
-    return row('Price (unadjusted)', '', fd(d.price, 4)) +
-      row('refCPI', '', fd(d.refCPI, 5)) +
+    return row('refCPI', '', fd(d.refCPI, 5)) +
       row('Dated date CPI', '', fd(d.baseCpi, 5)) +
       row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
-      row('Principal per bond', 'price/100 × index ratio × 1,000', fm2(principalPerBond)) +
+      row('Principal per bond', '1,000 × index ratio', fm2(principalPerBond)) +
       row('Coupon per period', 'annual coupon / 2', couponPct) +
       row('Coupon periods in FY', '', nPeriods + (nPeriods === 1 ? ' (1 semi-annual)' : ' (Jan + ' + matMonth + ')'));
   }
@@ -673,21 +672,18 @@ function buildDrillHTML(d, colIdx) {
   let rows = '';
 
   if (colIdx === 6) {
-    const netNeeded = d.dara - d.fy_laterMatInt;
-    const piPerBond = d.fy_pi;
     rows =
-      row('DARA target', '', fm(d.dara)) +
-      row('Later maturity interest', 'from bonds maturing after ' + d.fy, '− ' + fm(d.fy_laterMatInt)) +
-      row('Net needed from FY bonds', 'DARA − later mat. int.', fm(netNeeded)) +
+      bondVarRows() +
       sep() +
-      bondVarRows(d.fy_qty) +
-      row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(piPerBond)) +
-      row('Qty', 'round(' + fm(netNeeded) + ' / ' + fm2(piPerBond) + ')', d.fy_qty + ' bonds') +
-      sep() +
+      row('Qty', '', d.fy_qty + ' bonds') +
       row('Principal', 'principal/bond × qty', fm(d.fy_principalTotal)) +
       row(couponLabel, 'principal/bond × coupon/period × periods × qty', fm(d.fy_ownRungInt)) +
-      row('Later maturity interest', '', fm(d.fy_laterMatInt)) +
-      row('FY Amount', '', fm(d.fy_amt), true);
+      row('Later maturity interest', 'from bonds maturing after ' + d.fy, fm(d.fy_laterMatInt)) +
+      sep() +
+      row('FY Amount', 'Principal + Coupons + Later mat int', fm(d.fy_amt), true) +
+      sep() +
+      row('DARA', '', fm(d.dara)) +
+      row('Surplus / Deficit', 'FY Amount − DARA', (d.fy_amt - d.dara >= 0 ? '+' : '') + Math.round(d.fy_amt - d.dara).toLocaleString('en-US'));
 
   } else if (colIdx === 7) {
     rows =
