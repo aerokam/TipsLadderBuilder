@@ -17,7 +17,7 @@
   .mode-btn:hover:not(.active) { background: #e2e8f0; }
 
   /* ── Top row (form + net cash) ── */
-  #top-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 16px; }
+  #top-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 16px; position: sticky; top: 0; z-index: 20; background: #fafafa; padding-bottom: 4px; }
 
   /* ── Form ── */
   .form-card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; }
@@ -56,7 +56,7 @@
   .net { font-weight: 700; font-size: 16px; margin: 4px 0 0; }
 
   /* ── Main table ── */
-  .table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 180px); }
+  .table-wrap { overflow-x: auto; }
   table.main { border-collapse: collapse; width: 100%; background: #fff; font-size: 12px; }
   table.main th { background: #1e293b; color: #fff; padding: 5px 8px; text-align: right; font-weight: 600; white-space: nowrap; position: sticky; top: 0; }
   table.main th:first-child, table.main th:nth-child(3), table.main th:nth-child(4) { text-align: left; }
@@ -86,7 +86,7 @@
   /* ── Simple table ── */
   table.simple { border-collapse: collapse; width: auto; font-size: 13px; }
   table.simple th { background: #1e293b; color: #fff; padding: 6px 12px; text-align: right; box-shadow: 0 1px 0 #334155;
-                    font-weight: 600; white-space: nowrap; position: sticky; top: 0; }
+                    font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 10; }
   table.simple th:first-child, table.simple th:nth-child(2), table.simple th:nth-child(3) { text-align: left; }
   table.simple td { padding: 6px 12px; border-bottom: 1px solid #eee; white-space: nowrap; font-variant-numeric: tabular-nums; }
   table.simple td:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) { text-align: right; }
@@ -474,32 +474,30 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
     }).join('');
     return '<tr class="' + (noChange ? 'no-change' : '') + '">' + cells + '</tr>';
   }).join('\n');
-  // Total row: sum Qty Before, Qty After, Qty Delta, Cash Delta
-  const totals = { qtyBefore: 0, qtyAfter: 0, qtyDelta: 0, cashDelta: 0 };
+  // Total row: Amount Before/After + Cash Delta
+  const totals = { amtBefore: 0, amtAfter: 0, cashDelta: 0 };
   results.forEach((r, ri) => {
     const d = details[ri];
-    totals.qtyBefore += typeof r[1] === 'number' ? r[1] : 0;
-    const qa = r[8] === '' ? r[1] : r[8];
-    totals.qtyAfter  += typeof qa === 'number' ? qa : 0;
-    totals.qtyDelta  += typeof r[9] === 'number' ? r[9] : 0;
+    totals.amtBefore += typeof r[12] === 'number' ? r[12] : 0;
+    totals.amtAfter  += typeof r[14] === 'number' ? r[14] : 0;
     totals.cashDelta += (d && typeof d.cashDelta === 'number') ? d.cashDelta : (typeof r[11] === 'number' ? r[11] : 0);
   });
   const fmtSgn = v => { const r2 = Math.round(v); return (r2 > 0 ? '+' : '') + r2.toLocaleString('en-US'); };
   const tfootCells = SCOLS.map(({ label, fmt, key }) => {
-    const align = fmt !== 'str' ? ' style=	ext-align:right' : '';
+    const align = fmt !== 'str' ? ' style="text-align:right"' : '';
     let s = '';
-    if (label === 'Qty Before')  s = String(Math.round(totals.qtyBefore));
-    else if (label === 'Qty After')   s = String(Math.round(totals.qtyAfter));
-    else if (label === 'Qty Δ')  s = fmtSgn(totals.qtyDelta);
+    if (label === 'Amount Before') s = Math.round(totals.amtBefore).toLocaleString('en-US');
+    else if (label === 'Amount After') s = Math.round(totals.amtAfter).toLocaleString('en-US');
     else if (label === 'Cash Δ') s = fmtSgn(totals.cashDelta);
-    else if (label === 'CUSIP')       s = 'Total';
+    else if (label === 'CUSIP')        s = 'Total';
     return '<td' + align + '>' + esc(s) + '</td>';
   }).join('');
   const simpleFoot = '<tfoot><tr>' + tfootCells + '</tr></tfoot>';
-  simpleEl.innerHTML = simpleHeader + '<tbody>' + simpleBody + '</tbody>' + simpleFoot;
+    simpleEl.innerHTML = simpleHeader + '<tbody>' + simpleBody + '</tbody>' + simpleFoot;
 
   rebalanceRendered = true;
   document.getElementById('output').style.display = 'block';
+  updateStickyTop('simple-table', 'params-bar');
 }
 
 // ─── Render Build from Scratch output ────────────────────────────────────────
@@ -576,10 +574,38 @@ function renderBFSOutput({ results, HDR, summary, details }) {
     return '<tr class="' + (isBracket ? 'bracket' : '') + '">' + cells + '</tr>';
   }).join('\n');
 
-  tableEl.innerHTML = header + `<tbody>${body}</tbody>`;
+  // BFS total row
+  const bfsTotals = { fyAmt: 0, fyCost: 0, exAmt: 0, exCost: 0 };
+  results.forEach(r => {
+    bfsTotals.fyAmt  += typeof r[6] === 'number' ? r[6] : 0;
+    bfsTotals.fyCost += typeof r[7] === 'number' ? r[7] : 0;
+    bfsTotals.exAmt  += typeof r[8] === 'number' ? r[8] : 0;
+    bfsTotals.exCost += typeof r[9] === 'number' ? r[9] : 0;
+  });
+  const bfsFmt = v => Math.round(v).toLocaleString('en-US');
+  const bfsTfootCells = HDR.map((h, i) => {
+    const align = i > 1 ? ' style="text-align:right"' : '';
+    let s = '';
+    if (i === 0) s = 'Total';
+    else if (i === 6) s = bfsFmt(bfsTotals.fyAmt);
+    else if (i === 7) s = bfsFmt(bfsTotals.fyCost);
+    else if (i === 8) s = bfsFmt(bfsTotals.exAmt);
+    else if (i === 9) s = bfsFmt(bfsTotals.exCost);
+    return '<td' + align + '>' + esc(s) + '</td>';
+  }).join('');
+  tableEl.innerHTML = header + `<tbody>${body}</tbody>` + '<tfoot><tr>' + bfsTfootCells + '</tr></tfoot>';
 
   bfsRendered = true;
   document.getElementById('bfs-output').style.display = 'block';
+  updateStickyTop('bfs-table', 'bfs-params-bar');
+}
+
+// ─── Sticky header helper ─────────────────────────────────────────────────────────
+function updateStickyTop(tableId, paramsBarId) {
+  const topRow    = document.getElementById('top-row');
+  const paramsBar = document.getElementById(paramsBarId);
+  const top = (topRow ? topRow.offsetHeight : 0) + (paramsBar ? paramsBar.offsetHeight : 0);
+  document.querySelectorAll('#' + tableId + ' th').forEach(th => { th.style.top = top + 'px'; });
 }
 
 // ─── Run handler ──────────────────────────────────────────────────────────────
