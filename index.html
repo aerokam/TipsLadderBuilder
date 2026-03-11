@@ -112,11 +112,12 @@
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Key Concepts</h3>
     <p><b>DARA</b> — Desired Annual Real Amount. Your target annual income in today's (inflation-adjusted) dollars. Each rung is sized to produce this amount.</p>
     <p><b>Gap Years</b> — Years with no issued TIPS (currently 2037–2039). The ladder holds excess bonds in <b>bracket</b> years flanking the gap to match the average duration of the missing maturities.</p>
-    <p><b>Bracket Years</b> — <i>Upper bracket</i>: always the Feb 2040 TIPS. <i>Lower bracket</i>: for Build, the latest issued 10-year TIPS before the gap; for Rebalance, the TIPS before the gap with the largest existing holdings. Excess bonds in these years duration-match the gap.</p>
+    <p><b>Bracket Years</b> — <i>Upper bracket</i>: always the Feb 2040 TIPS. <i>Lower bracket</i>: for Build and 2-bracket Rebalance, the latest issued 10-year TIPS before the gap; for Rebalance, defaults to the TIPS before the gap with the largest existing holdings (original lower). In <i>3-bracket mode</i>, the original lower bracket excess is held as-is; a second lower bracket (the Jan TIPS just before the gap — "new lower") is bought to supplement. Excess bonds in bracket years duration-match the gap.</p>
     <p><b>RefCPI</b> — Reference CPI value used for all inflation adjustments.</p>
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Mode: Rebalance</h3>
-    <p>For existing TIPS ladder holders. Sells excess bracket bonds and buys into newly available maturities (former gap years). Assumes you want to continue using your original lower bracket TIPS.</p>
+    <p>For existing TIPS ladder holders. Sells excess bracket bonds and buys into newly available maturities (former gap years).</p>
+    <p><b>Brackets</b> — <i>2-bracket</i>: standard lower + upper split (lower bracket = TIPS with most holdings before the gap). <i>3-bracket</i>: original lower bracket excess is frozen; a new lower bracket (latest Jan 10-year TIPS before the gap) is bought to supplement, allowing a more duration-efficient split. Use when the new lower TIPS now exists and you want to minimize disturbance to your existing lower holdings.</p>
     <p><b>Holdings CSV</b> — Two columns: <code>cusip</code> and <code>qty</code>. A sample is pre-filled when you click the file input.</p>
     <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">cusip,qty
 912828S50,50
@@ -138,9 +139,10 @@
     <p><b>Total Cost</b> — full ladder purchase cost.</p>
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Duration Matching</h3>
-    <p>Synthetic TIPS are created for gap years using yield interpolation between the bracket anchors. Excess bonds are split between the lower and upper bracket so their weighted duration matches the average duration of the gap years:</p>
-    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">lowerWeight × lowerDuration + upperWeight × upperDuration = gapAvgDuration
-e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
+    <p>Synthetic TIPS are created for gap years using yield interpolation between the bracket anchors. Excess bonds are split between brackets so their weighted duration matches the average duration of the gap years:</p>
+    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">2-bracket:  lowerWeight × lowerDur + upperWeight × upperDur = gapAvgDur
+3-bracket:  w1 (orig lower, fixed) + w2 (new lower) + w3 (upper) = 1
+            w1×d1 + w2×d2 + w3×d3 = gapAvgDur  →  unique solution given w1</pre>
   </div>
 </div>
 
@@ -173,6 +175,13 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
         <select id="method">
           <option value="Gap">Gap</option>
           <option value="Full">Full</option>
+        </select>
+      </div>
+      <div class="field" id="field-bracket-mode">
+        <label>Brackets</label>
+        <select id="bracket-mode">
+          <option value="2bracket">2-bracket</option>
+          <option value="3bracket">3-bracket (orig + new lower + upper)</option>
         </select>
       </div>
       <div class="field" id="field-first-year" style="display:none">
@@ -354,7 +363,8 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     if (isRebalance) { _daraBuild = daraEl.value; daraEl.value = _daraRebal; }
     else             { _daraRebal = daraEl.value; daraEl.value = _daraBuild || '10000'; }
     document.getElementById('field-holdings').style.display  = isRebalance ? '' : 'none';
-    document.getElementById('field-method').style.display    = isRebalance ? '' : 'none';
+    document.getElementById('field-method').style.display        = isRebalance ? '' : 'none';
+    document.getElementById('field-bracket-mode').style.display   = isRebalance ? '' : 'none';
     document.getElementById('field-last-year').style.display  = isRebalance ? 'none' : '';
     document.getElementById('field-first-year').style.display = isRebalance ? 'none' : '';
     if (!isRebalance) document.getElementById('dara').closest('.field').style.display = '';
@@ -378,6 +388,7 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
     firstYear, lastYear, rungCount, gapYears,
     gapParams, brackets,
     lowerDuration, upperDuration, lowerWeight, upperWeight,
+    bracketMode: _bracketMode, newLowerYear, newLowerCUSIP,
     beforeLowerWeight, beforeUpperWeight, afterLowerWeight, afterUpperWeight,
     totalCurrentExcess, totalExcessCost,
     costDeltaSum,
@@ -396,9 +407,13 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
         : 'All contiguous rungs in this range are rebalanced.' },
   ];
     _infoPopups.duration = buildDurationPopupRows(summary, 'rebal');
+    const _bracketInfo = summary.bracketMode === '3bracket' && summary.newLowerCUSIP
+      ? ' · New lower: ' + summary.newLowerCUSIP + ' (' + summary.newLowerYear + ')'
+      : '';
     _rebalRunInfo = ' · DARA <b><span class="copy-dara" data-val="' + Math.round(DARA) + '" title="Click to copy">' + esc(Math.round(DARA).toLocaleString()) + '</span></b>'
       + (inferredDARA ? ' <span style="color:#888;font-weight:400">(inferred)</span>' : '')
       + ' · FY ' + firstYear + '–' + lastYear + ', ' + rungCount + ' rungs'
+      + _bracketInfo
       + ' <a class="info-link" data-popup="range">ⓘ</a>'
       + ' · <a class="info-link" data-popup="duration">Duration calcs</a>';
     document.getElementById('info-strip').innerHTML = _staticInfo + _rebalRunInfo;
@@ -492,7 +507,8 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 
       const daraInput = document.getElementById('dara').value.trim();
       const dara      = daraInput ? parseFloat(daraInput) : null;
-      const method    = document.getElementById('method').value;
+      const method       = document.getElementById('method').value;
+      const bracketMode  = document.getElementById('bracket-mode').value;
 
       const text     = await fileInput.files[0].text();
       const rawLines = text.trim().split('\n').filter(l => l.trim());
@@ -529,7 +545,7 @@ document.getElementById('run-btn').addEventListener('click', async () => {
         ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ holdings, tipsMap, refCPI, settlementDate }));
       }
       setStatus('Running rebalance…');
-      const result = runRebalance({ dara: finalDara, method, holdings, tipsMap, refCPI, settlementDate });
+      const result = runRebalance({ dara: finalDara, method, bracketMode, holdings, tipsMap, refCPI, settlementDate });
       renderOutput(result, portfolioCash);
       setStatus('');
     }

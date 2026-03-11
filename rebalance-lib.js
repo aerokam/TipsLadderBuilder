@@ -6,7 +6,7 @@
 // Spec: knowledge/4.0_TIPS_Ladder_Rebalancing.md
 
 import { bondCalcs, calculateMDuration, rungAmount } from './bond-math.js';
-import { interpolateYield, syntheticCoupon, bracketWeights, bracketExcessQtys, fyQty as _fyQty, laterMatIntContribution } from './gap-math.js';
+import { interpolateYield, syntheticCoupon, bracketWeights, bracketWeights3, bracketExcessQtys, fyQty as _fyQty, laterMatIntContribution } from './gap-math.js';
 
 // Re-export bond-math functions that external callers depend on
 export { calculateDuration, calculateMDuration, getNumPeriods } from './bond-math.js';
@@ -281,7 +281,7 @@ export function inferDARAFromCash({ holdings: holdingsRaw, tipsMap, refCPI, sett
 
 
 // Spec: knowledge/4.0_TIPS_Ladder_Rebalancing.md — Algorithm Flow (Gap-Only) and Full Rebalance
-export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
+export function runRebalance({ dara, method, bracketMode = '2bracket', holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
   const settleDateStr  = toDateStr(settlementDate);
   const settleDateDisp = fmtDate(settlementDate);
 
@@ -391,18 +391,35 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     lowerBond?.coupon ?? 0, lowerBond?.yield ?? 0);
   const upperDuration = calculateMDuration(settlementDate, brackets.upperMaturity,
     upperBond?.coupon ?? 0, upperBond?.yield ?? 0);
-  const { lowerWeight, upperWeight } = bracketWeights(lowerDuration, upperDuration, gapParams.avgDuration);
+  const minGapYear  = Math.min(...gapYears);
+  const is3Bracket = bracketMode === '3bracket';
+  let newLowerYear = null, newLowerCUSIP = null, newLowerMaturity = null, newLowerDuration = 0;
+  if (is3Bracket) {
+    for (const [_cusip, _bond] of tipsMap.entries()) {
+      if (!_bond.maturity) continue;
+      if (_bond.maturity.getFullYear() === minGapYear - 1 && _bond.maturity.getMonth() + 1 === 1) {
+        newLowerCUSIP = _cusip; newLowerMaturity = _bond.maturity; newLowerYear = _bond.maturity.getFullYear(); break;
+      }
+    }
+    if (!newLowerCUSIP) throw new Error('3-bracket: no Jan TIPS for ' + (minGapYear - 1));
+    const _nlBond = tipsMap.get(newLowerCUSIP);
+    newLowerDuration = calculateMDuration(settlementDate, newLowerMaturity, _nlBond?.coupon ?? 0, _nlBond?.yield ?? 0);
+  }
+  let lowerWeight, upperWeight, origLowerWeight, newLowerWeight3, upperWeight3;
 
   // Phase 3b: Before-state bracket excess (display only)
-  const bracketYearSet = new Set([brackets.lowerYear, brackets.upperYear]);
-  const gapYearSet     = new Set(gapYears);
-  const minGapYear     = Math.min(...gapYears);
+  const bracketYearSet = is3Bracket
+    ? new Set([brackets.lowerYear, brackets.upperYear, newLowerYear])
+    : new Set([brackets.lowerYear, brackets.upperYear]);
+  const gapYearSet = new Set(gapYears);
 
   const bracketTargetFYQtyBefore = {};
-  for (const [bracketYear, bracketCUSIP, bracketMaturity] of [
+  const _bracketTriplets = [
     [brackets.lowerYear, brackets.lowerCUSIP, brackets.lowerMaturity],
     [brackets.upperYear, brackets.upperCUSIP, brackets.upperMaturity],
-  ]) {
+    ...(is3Bracket ? [[newLowerYear, newLowerCUSIP, newLowerMaturity]] : []),
+  ];
+  for (const [bracketYear, bracketCUSIP, bracketMaturity] of _bracketTriplets) {
     let laterMatIntBefore = 0;
     for (const y in araLaterMaturityInterestByYear) {
       if (parseInt(y) > bracketYear) laterMatIntBefore += araLaterMaturityInterestByYear[y];
@@ -421,6 +438,25 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     bracketTargetFYQtyBefore[bracketYear] = tFYQty;
   }
 
+  // Phase 3c: Compute bracket weights
+  if (is3Bracket) {
+    const _olH   = yearInfo[brackets.lowerYear]?.holdings?.find(h => h.cusip === brackets.lowerCUSIP);
+    const _olQty = _olH?.qty ?? 0;
+    const _lBond = tipsMap.get(brackets.lowerCUSIP);
+    const _olCPB = (_lBond?.price ?? 0) / 100 * (refCPI / (_lBond?.baseCpi ?? refCPI)) * 1000;
+    const _currentOrigLowerExcess = Math.max(0, _olQty - (bracketTargetFYQtyBefore[brackets.lowerYear] ?? 0)) * _olCPB;
+    const _w3 = bracketWeights3(lowerDuration, newLowerDuration, upperDuration, gapParams.avgDuration, _currentOrigLowerExcess, gapParams.totalCost);
+    origLowerWeight = _w3.origLowerWeight;
+    newLowerWeight3 = _w3.newLowerWeight;
+    upperWeight3    = _w3.upperWeight;
+    lowerWeight = origLowerWeight;
+    upperWeight = upperWeight3;
+  } else {
+    const _w2 = bracketWeights(lowerDuration, upperDuration, gapParams.avgDuration);
+    lowerWeight = _w2.lowerWeight;
+    upperWeight = _w2.upperWeight;
+  }
+
   // Phase 4: Ladder rebuild (longest to shortest)
   let rebalYearSet;
   if (isFullMode) {
@@ -431,11 +467,15 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   } else {
     rebalYearSet = new Set(
       Object.keys(yearInfo).map(Number)
-        .filter(y => y > brackets.lowerYear && y < minGapYear)
+        .filter(y => y > brackets.lowerYear && y < minGapYear && !bracketYearSet.has(y))
     );
   }
 
-  const bracketExcessTarget = {
+  const bracketExcessTarget = is3Bracket ? {
+    [brackets.lowerYear]: gapParams.totalCost * origLowerWeight,
+    [brackets.upperYear]: gapParams.totalCost * upperWeight3,
+    [newLowerYear]:       gapParams.totalCost * newLowerWeight3,
+  } : {
     [brackets.lowerYear]: gapParams.totalCost * lowerWeight,
     [brackets.upperYear]: gapParams.totalCost * upperWeight,
   };
@@ -460,7 +500,9 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     // Select target CUSIP: bracket years use bracket CUSIP; non-bracket use latest maturity
     let targetCUSIP, targetMaturity;
     if (isBracket) {
-      targetCUSIP = year === brackets.lowerYear ? brackets.lowerCUSIP : brackets.upperCUSIP;
+      targetCUSIP = year === brackets.lowerYear ? brackets.lowerCUSIP
+                  : year === brackets.upperYear ? brackets.upperCUSIP
+                  : newLowerCUSIP;
       const _bh = yi.holdings.find(h => h.cusip === targetCUSIP);
       targetMaturity = _bh ? _bh.maturity : null;
     } else {
@@ -713,7 +755,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     let excessBefore = '', excessAfter = '';
     const bt = buySellTargets[h.year];
     if (bt?.isBracket && h.cusip === bt.targetCUSIP) {
-      const exQtyBef = h.qty - (bracketTargetFYQtyBefore[h.year] ?? 0);
+      // new lower bracket had no excess designation before → clamp to 0
+      const exQtyBef = Math.max(0, h.qty - (bracketTargetFYQtyBefore[h.year] ?? 0));
       const exQtyAft = bt.postRebalQty - bt.targetFYQty;
       excessBefore = exQtyBef * piPerBondFX;
       excessAfter  = exQtyAft * piPerBondFX;
@@ -737,7 +780,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
           const dIsNTS   = !!nonTargetSells[h.cusip];
           const dQtyAfter   = dIsTarget ? dBT.postRebalQty : dIsNTS ? nonTargetSells[h.cusip].newQty : h.qty;
           const dFYQty      = dIsTarget ? dBT.targetFYQty  : dIsNTS ? nonTargetSells[h.cusip].newQty : h.qty;
-          const dExQtyBef   = dIsBT ? h.qty - bracketTargetFYQtyBefore[h.year] : 0;
+          const dExQtyBef   = dIsBT ? Math.max(0, h.qty - bracketTargetFYQtyBefore[h.year]) : 0;
           const dExQtyAft   = dIsBT ? dBT.postRebalQty - dBT.targetFYQty : 0;
           const dLast       = isLastInYear;
           const dBComp      = dLast ? beforeARACompByYear[h.year] : null;
@@ -774,33 +817,40 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   const costDeltaSum = results.reduce((sum, row) => sum + (typeof row[11] === 'number' ? row[11] : 0), 0);
 
   // Weight summary
-  const lowerBondS       = tipsMap.get(brackets.lowerCUSIP);
-  const upperBondS       = tipsMap.get(brackets.upperCUSIP);
-  const lowerPrice       = lowerBondS?.price ?? 0;
-  const lowerBaseCpi     = lowerBondS?.baseCpi ?? refCPI;
-  const lowerCostPerBond = lowerPrice / 100 * (refCPI / lowerBaseCpi) * 1000;
-  const upperPrice       = upperBondS?.price ?? 0;
-  const upperBaseCpi     = upperBondS?.baseCpi ?? refCPI;
-  const upperCostPerBond = upperPrice / 100 * (refCPI / upperBaseCpi) * 1000;
+  const lowerBondS = tipsMap.get(brackets.lowerCUSIP);
+  const upperBondS = tipsMap.get(brackets.upperCUSIP);
+  const lowerCostPerBond = (lowerBondS?.price ?? 0) / 100 * (refCPI / (lowerBondS?.baseCpi ?? refCPI)) * 1000;
+  const upperCostPerBond = (upperBondS?.price ?? 0) / 100 * (refCPI / (upperBondS?.baseCpi ?? refCPI)) * 1000;
 
-  const lowerCurrentExcess = buySellTargets[brackets.lowerYear].currentExcessCost;
-  const upperCurrentExcess = buySellTargets[brackets.upperYear].currentExcessCost;
-  const totalCurrentExcess = lowerCurrentExcess + upperCurrentExcess;
-
-  const lowerPostQty     = buySellTargets[brackets.lowerYear].postRebalQty;
-  const upperPostQty     = buySellTargets[brackets.upperYear].postRebalQty;
-  const lowerTargetFYQty = buySellTargets[brackets.lowerYear].targetFYQty;
-  const upperTargetFYQty = buySellTargets[brackets.upperYear].targetFYQty;
+  const lowerCurrentExcess = buySellTargets[brackets.lowerYear]?.currentExcessCost ?? 0;
+  const upperCurrentExcess = buySellTargets[brackets.upperYear]?.currentExcessCost ?? 0;
+  const lowerPostQty     = buySellTargets[brackets.lowerYear]?.postRebalQty ?? 0;
+  const upperPostQty     = buySellTargets[brackets.upperYear]?.postRebalQty ?? 0;
+  const lowerTargetFYQty = buySellTargets[brackets.lowerYear]?.targetFYQty ?? 0;
+  const upperTargetFYQty = buySellTargets[brackets.upperYear]?.targetFYQty ?? 0;
   const lowerExcessQty   = lowerPostQty - lowerTargetFYQty;
   const upperExcessQty   = upperPostQty - upperTargetFYQty;
   const lowerExcessCost  = lowerExcessQty * lowerCostPerBond;
   const upperExcessCost  = upperExcessQty * upperCostPerBond;
-  const totalExcessCost  = lowerExcessCost + upperExcessCost;
 
-  const beforeLowerWeight = totalCurrentExcess > 0 ? lowerCurrentExcess / totalCurrentExcess : null;
-  const beforeUpperWeight = totalCurrentExcess > 0 ? upperCurrentExcess / totalCurrentExcess : null;
-  const afterLowerWeight  = totalExcessCost   > 0 ? lowerExcessCost   / totalExcessCost   : null;
-  const afterUpperWeight  = totalExcessCost   > 0 ? upperExcessCost   / totalExcessCost   : null;
+  let newLowerCPB3 = 0, newLowerCurrentExcess3 = 0, newLowerExcessCost3 = 0;
+  if (is3Bracket) {
+    const nlBond = tipsMap.get(newLowerCUSIP);
+    newLowerCPB3           = (nlBond?.price ?? 0) / 100 * (refCPI / (nlBond?.baseCpi ?? refCPI)) * 1000;
+    newLowerCurrentExcess3 = buySellTargets[newLowerYear]?.currentExcessCost ?? 0;
+    const nlPostQty        = buySellTargets[newLowerYear]?.postRebalQty ?? 0;
+    const nlFYQty          = buySellTargets[newLowerYear]?.targetFYQty ?? 0;
+    newLowerExcessCost3    = (nlPostQty - nlFYQty) * newLowerCPB3;
+  }
+  const totalCurrentExcess = lowerCurrentExcess + upperCurrentExcess + newLowerCurrentExcess3;
+  const totalExcessCost    = lowerExcessCost    + upperExcessCost    + newLowerExcessCost3;
+
+  const beforeLowerWeight    = totalCurrentExcess > 0 ? lowerCurrentExcess    / totalCurrentExcess : null;
+  const beforeUpperWeight    = totalCurrentExcess > 0 ? upperCurrentExcess    / totalCurrentExcess : null;
+  const beforeNewLowerWeight = is3Bracket && totalCurrentExcess > 0 ? newLowerCurrentExcess3 / totalCurrentExcess : null;
+  const afterLowerWeight     = totalExcessCost > 0 ? lowerExcessCost  / totalExcessCost : null;
+  const afterUpperWeight     = totalExcessCost > 0 ? upperExcessCost  / totalExcessCost : null;
+  const afterNewLowerWeight  = is3Bracket && totalExcessCost > 0 ? newLowerExcessCost3 / totalExcessCost : null;
 
   const HDR = ['CUSIP','Qty','Maturity','FY','Principal','Interest','ARA','Cost',
                'Target Qty','Qty Delta','Target Cost','Cost Delta',
@@ -812,7 +862,9 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     firstYear, lastYear, rungCount, gapYears, araByYear,
     gapParams, brackets,
     lowerDuration, upperDuration, lowerWeight, upperWeight,
-    beforeLowerWeight, beforeUpperWeight, afterLowerWeight, afterUpperWeight,
+    bracketMode, newLowerYear, newLowerCUSIP, newLowerDuration, newLowerWeight3, origLowerWeight,
+    beforeLowerWeight, beforeUpperWeight, beforeNewLowerWeight,
+    afterLowerWeight, afterUpperWeight, afterNewLowerWeight,
     totalCurrentExcess, totalExcessCost,
     costDeltaSum,
   };

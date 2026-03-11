@@ -74,15 +74,8 @@ export function buildDrillHTML(d, colKey, summary) {
       const isLower = d.fundedYear === s.lowerYear;
       const weight  = isLower ? s.lowerWeight  : s.upperWeight;
       const wLabel  = isLower ? 'Lower weight' : 'Upper weight';
-      const wFml    = isLower
-        ? '(upper dur \u2212 avg dur) / (upper dur \u2212 lower dur)'
-        : '1 \u2212 lower weight';
       const exCost  = s.gapParams.totalCost * weight;
-      rows = row('Gap year avg duration', '', fd(s.gapParams.avgDuration, 2) + ' yr')
-        + row('Lower bracket (' + s.lowerYear + ')', 'duration', fd(s.lowerDuration, 2) + ' yr')
-        + row('Upper bracket (' + s.upperYear + ')', 'duration', fd(s.upperDuration, 2) + ' yr')
-        + sep()
-        + row(wLabel, wFml, fd(weight, 4))
+      rows = row('Bracket weights', 'see Duration Calcs \u2197', fd(weight, 4))
         + sep()
         + row('Gap year total cost', '', fm(s.gapParams.totalCost))
         + row('Target excess cost', 'total cost \xd7 ' + wLabel.toLowerCase(), fm(exCost))
@@ -220,18 +213,14 @@ export function buildDrillHTML(d, colKey, summary) {
       }
     } else if (s && s.brackets) {
       const isLower = d.cusip === s.brackets.lowerCUSIP;
-      const weight  = isLower ? s.lowerWeight  : s.upperWeight;
-      const wLabel  = isLower ? 'Lower weight' : 'Upper weight';
-      const wFml    = isLower
-        ? '(upper dur \u2212 avg dur) / (upper dur \u2212 lower dur)'
-        : '1 \u2212 lower weight';
+      const isNewLower = s.bracketMode === '3bracket' && d.cusip === s.newLowerCUSIP;
+      const weight  = isLower ? (s.origLowerWeight ?? s.lowerWeight)
+                   : isNewLower ? (s.newLowerWeight3 ?? 0)
+                   : s.upperWeight;
+      const wLabel  = isLower ? 'Orig lower weight' : isNewLower ? 'New lower weight' : 'Upper weight';
       const exCost  = s.gapParams.totalCost * weight;
       const exQty   = d.excessQtyAfter;
-      rows = row('Gap year avg duration', '', fd(s.gapParams.avgDuration, 2) + ' yr')
-        + row('Lower bracket (' + s.brackets.lowerCUSIP + ')', 'duration', fd(s.lowerDuration, 2) + ' yr')
-        + row('Upper bracket (' + s.brackets.upperCUSIP + ')', 'duration', fd(s.upperDuration, 2) + ' yr')
-        + sep()
-        + row(wLabel, wFml, fd(weight, 4))
+      rows = row('Bracket weights', 'see Duration Calcs \u2197', fd(weight, 4))
         + sep()
         + row('Gap year total cost', '', fm(s.gapParams.totalCost))
         + row('Target excess cost', 'total cost \xd7 ' + wLabel.toLowerCase(), fm(exCost))
@@ -284,6 +273,31 @@ export function buildDurationPopupRows(summary, mode) {
   const upperLabel = mode === 'build'
     ? summary.upperMonth + ' ' + upperYear : String(upperYear);
   const { lowerDuration, upperDuration, lowerWeight, upperWeight, gapParams } = summary;
+  const is3 = mode === 'rebal' && summary.bracketMode === '3bracket' && summary.newLowerCUSIP;
+
+  if (is3) {
+    const { newLowerYear, newLowerDuration, origLowerWeight, newLowerWeight3 } = summary;
+    const w1 = (origLowerWeight ?? 0), w2 = (newLowerWeight3 ?? 0), w3 = upperWeight ?? 0;
+    const match = w1.toFixed(4) + ' × ' + lowerDuration.toFixed(2)
+                + ' + ' + w2.toFixed(4) + ' × ' + newLowerDuration.toFixed(2)
+                + ' + ' + w3.toFixed(4) + ' × ' + upperDuration.toFixed(2)
+                + ' ≈ ' + gapParams.avgDuration.toFixed(2);
+    return [
+      { label: 'Gap avg duration', value: gapParams.avgDuration.toFixed(2) + ' yr' },
+      { label: 'Gap years',        value: (summary.gapYears || []).join(', ') || '—' },
+      { sep: true },
+      { label: 'Orig lower (' + lowerYear + ')',    note: 'mod. duration', value: lowerDuration.toFixed(2) + ' yr' },
+      { label: 'New lower (' + newLowerYear + ')',  note: 'mod. duration', value: newLowerDuration.toFixed(2) + ' yr' },
+      { label: 'Upper (' + upperYear + ')',         note: 'mod. duration', value: upperDuration.toFixed(2) + ' yr' },
+      { sep: true },
+      { label: 'Orig lower weight', note: 'current excess / gap total cost (fixed)', value: w1.toFixed(4) },
+      { label: 'New lower weight',  note: 'solved from duration constraint',          value: w2.toFixed(4) },
+      { label: 'Upper weight',      note: '1 − w1 − w2',                             value: w3.toFixed(4) },
+      { sep: true },
+      { label: 'Duration match', note: match, total: true },
+    ];
+  }
+
   const wFml = '(upper dur − avg dur) / (upper dur − lower dur)';
   const match = lowerWeight.toFixed(4) + ' × ' + lowerDuration.toFixed(2)
               + ' + ' + upperWeight.toFixed(4) + ' × ' + upperDuration.toFixed(2)

@@ -41,6 +41,19 @@ export function fyQty(dara, laterMatInt, piPerBond) {
   return Math.max(0, Math.round((dara - laterMatInt) / piPerBond));
 }
 
+// ─── 3-Bracket weights ────────────────────────────────────────────────────────
+// Spec: 4.0 §3-Bracket Mode
+// d1=origLower, d2=newLower, d3=upper, Dg=gapAvgDuration
+// origExcess$ = current excess cost in original lower bracket
+export function bracketWeights3(d1, d2, d3, Dg, origExcess$, gapTotalCost) {
+  // w1 is fixed at current orig lower excess — never capped (no selling of orig lower)
+  const w1    = gapTotalCost > 0 ? origExcess$ / gapTotalCost : 0;
+  const w2raw = (Dg - d3 + w1 * (d3 - d1)) / (d2 - d3);
+  const w2    = Math.max(0, w2raw); // clamp: if orig lower overshoots, skip new lower
+  const w3    = 1 - w1 - w2;
+  return { origLowerWeight: w1, newLowerWeight: w2, upperWeight: w3, feasible: w2raw >= 0 };
+}
+
 // ─── Later maturity interest contribution ─────────────────────────────────────
 // Spec: 4.0 Phase 4 step 4
 // annualInt comes from bondCalcs(bond, refCPI).annualInt
