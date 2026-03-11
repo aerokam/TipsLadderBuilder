@@ -2,7 +2,18 @@ name: Fetch Reference CPI
 
 on:
   schedule:
-    - cron: '0 15 12 * *'   # 12th of each month at 15:00 UTC
+    - cron: '35 13 13 1 *'  # Jan 13 at 8:35 AM EST
+    - cron: '35 13 13 2 *'  # Feb 13 at 8:35 AM EST
+    - cron: '35 12 11 3 *'  # Mar 11 at 8:35 AM EDT
+    - cron: '35 12 10 4 *'  # Apr 10 at 8:35 AM EDT
+    - cron: '35 12 12 5 *'  # May 12 at 8:35 AM EDT
+    - cron: '35 12 10 6 *'  # Jun 10 at 8:35 AM EDT
+    - cron: '35 12 14 7 *'  # Jul 14 at 8:35 AM EDT
+    - cron: '35 12 12 8 *'  # Aug 12 at 8:35 AM EDT
+    - cron: '35 12 11 9 *'  # Sep 11 at 8:35 AM EDT
+    - cron: '35 12 14 10 *' # Oct 14 at 8:35 AM EDT
+    - cron: '35 13 10 11 *' # Nov 10 at 8:35 AM EST
+    - cron: '35 13 10 12 *' # Dec 10 at 8:35 AM EST
   workflow_dispatch:
 
 jobs:
