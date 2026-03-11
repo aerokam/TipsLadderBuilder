@@ -99,7 +99,7 @@ export const COLS = [
   { label: 'Qty',    key: 'qty',    fmt: 'qty', buildOnly: true,
     value:    d => d.fundedYearQty,
     subValue: d => d.excessQty,
-    total: true, totalFn: d => (d.fundedYearQty ?? 0) + (d.excessQty ?? 0) },
+    total: false },
 ];
 
 function isBracket(d, mode) {
@@ -130,7 +130,7 @@ export function renderTable({ details, mode, summary }) {
   const cols = COLS.filter(c => mode === 'rebal' ? !c.buildOnly : !c.rebalOnly);
 
   const headerHTML = '<thead><tr>' +
-    cols.map(c => '<th>' + esc(c.label) + '</th>').join('') +
+    cols.map(c => '<th data-col="' + c.key + '" style="cursor:help">' + esc(c.label) + '</th>').join('') +
     '</tr></thead>';
 
   const bodyRows = details.map((d, ri) => {

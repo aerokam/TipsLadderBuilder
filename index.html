@@ -20,7 +20,7 @@
   #top-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 16px; position: sticky; top: 0; z-index: 20; background: #fafafa; padding-bottom: 4px; }
 
   /* ── Form ── */
-  .form-card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; }
+  .form-card { background: #d8e3f0; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; }
   .fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
   .field { display: flex; flex-direction: column; gap: 3px; }
   .field label { font-size: 11px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .04em; }
@@ -38,7 +38,7 @@
 
   /* ── Main table ── */
   .table-wrap { padding: 12px 16px; }
-  .table-scroll-wrap { overflow: auto; }
+  .table-scroll-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; }
   table.main { border-collapse: collapse; width: 100%; background: #fff; font-size: 12px; }
   table.main th { background: #1e293b; color: #fff; padding: 5px 8px; text-align: right; font-weight: 600; white-space: nowrap; position: sticky; top: 0; }
   table.main th:first-child, table.main th:nth-child(3), table.main th:nth-child(4) { text-align: left; }
@@ -70,7 +70,7 @@
   table.simple th:first-child, table.simple th:nth-child(2), table.simple th:nth-child(3) { text-align: left; }
   table.simple td { padding: 6px 12px; border-bottom: 1px solid #eee; white-space: nowrap; font-variant-numeric: tabular-nums; }
   table.simple td:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) { text-align: right; }
-  table.simple tr.no-change td { color: #bbb; }
+  table.simple tr.no-change td { color: #94a3b8; }
   table.simple tr.excess-subrow td { background: #f1f5f9; color: #475569; font-size: 12px; }
   table.simple tr.bracket td { background: #f0f9ff; }
   table.simple tr:hover td { background: #fffde7; }
@@ -87,10 +87,7 @@
   #net-cash-inline { display:none; align-self:flex-end; padding-bottom:4px; white-space:nowrap; margin-left:auto; }
   #net-cash-inline .nc-label { font-size:10px; font-weight:600; color:#888; text-transform:uppercase; letter-spacing:.04em; display:block; }
   #net-cash-inline .nc-val { font-size:15px; font-weight:700; line-height:1; }
-  /* ── Info popover card ── */
-  #info-card { position: fixed; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 14px 16px 12px; width: max-content; max-width: 90vw; box-shadow: 0 4px 16px rgba(0,0,0,.15); z-index: 300; font-size: 12px; cursor: default; }
-  #info-card-close { position: absolute; top: 6px; right: 8px; background: none; border: none; font-size: 16px; color: #888; cursor: pointer; line-height: 1; padding: 0; }
-  #info-card-title { font-size: 12px; font-weight: 700; margin-bottom: 10px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; cursor: move; user-select: none; }
+
 
   #output     { display: none; }
   #build-output { display: none; }
@@ -147,13 +144,6 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
   </div>
 </div>
 
-<!-- Info popover card -->
-<div id="info-card" style="display:none">
-  <button id="info-card-close">&#215;</button>
-  <div id="info-card-title"></div>
-  <div id="info-card-content"></div>
-</div>
-
 <!-- Drill-down modal -->
 <div id="drill-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;overflow:hidden;">
   <div id="drill-modal" style="background:#fff;max-width:calc(100vw - 32px);box-sizing:border-box;border-radius:8px;padding:24px 28px;position:fixed;top:60px;left:50%;transform:translateX(-50%);font-size:13px;">
@@ -184,6 +174,10 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
           <option value="Gap">Gap</option>
           <option value="Full">Full</option>
         </select>
+      </div>
+      <div class="field" id="field-first-year" style="display:none">
+        <label for="first-year">First Year</label>
+        <select id="first-year"><option value="">—</option></select>
       </div>
       <div class="field" id="field-last-year" style="display:none">
         <label>Last Year</label>
@@ -224,7 +218,8 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
 import { buildTipsMapFromYields, localDate, runRebalance, inferDARAFromCash } from './rebalance-lib.js';
 import { runBuild } from './build-lib.js';
 import { renderTable } from './render.js';
-import { buildDrillHTML, buildDurationPopupHTML } from './drill.js';
+import { buildDrillHTML, buildDurationPopupRows } from './drill.js';
+import { showPopup, hidePopup } from './popup.js';
 import { fetchTipsData, lookupRefCpi } from './data.js';
 
 const simpleEl = document.getElementById('simple-table');
@@ -267,6 +262,14 @@ async function loadData() {
       opt.value = y; opt.textContent = y;
       lastYearSel.appendChild(opt);
     });
+    const firstYearSel = document.getElementById('first-year');
+    while (firstYearSel.options.length > 1) firstYearSel.remove(1);
+    bfsYears.forEach(y => {
+      const opt = document.createElement('option');
+      opt.value = y; opt.textContent = y;
+      firstYearSel.appendChild(opt);
+    });
+    firstYearSel.value = bfsYears[0] || '';
 
     const staticRefCPI = lookupRefCpi(refCpiRows, settleDateStr);
         const _matYears = new Set([...tipsMap.values()]
@@ -352,8 +355,9 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     else             { _daraRebal = daraEl.value; daraEl.value = _daraBuild || '10000'; }
     document.getElementById('field-holdings').style.display  = isRebalance ? '' : 'none';
     document.getElementById('field-method').style.display    = isRebalance ? '' : 'none';
-    document.getElementById('field-last-year').style.display = isRebalance ? 'none' : '';
-    if (isRebalance) syncDaraVisibility(); else { document.getElementById('dara').closest('.field').style.display = ''; }
+    document.getElementById('field-last-year').style.display  = isRebalance ? 'none' : '';
+    document.getElementById('field-first-year').style.display = isRebalance ? 'none' : '';
+    if (!isRebalance) document.getElementById('dara').closest('.field').style.display = '';
     document.getElementById('run-btn').textContent = isRebalance ? 'Run Rebalance' : 'Build Ladder';
 
     document.getElementById('output').style.display     = isRebalance && rebalanceRendered ? 'block' : 'none';
@@ -383,10 +387,15 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
     document.getElementById('net-cash-val').className = 'nc-val ' + (costDeltaSum >= 0 ? 'pos' : 'neg');
     document.getElementById('nc-label').textContent = 'Net Cash';
     document.getElementById('net-cash-inline').style.display = '';
-    _infoPopups.range = '<p style="margin:0;line-height:1.6">Range <b>' + firstYear + '–' + lastYear + '</b> (' + rungCount + ' rungs). Method: <b>' + method + '</b>.<br>' +
-      (method === 'Gap' ? 'Bracket years and former gap years rebalanced; other rungs unchanged.'
-                        : 'All contiguous rungs in this range are rebalanced.') + '</p>';
-    _infoPopups.duration = buildDurationPopupHTML(summary, 'rebal');
+    _infoPopups.range = [
+    { label: 'Range', value: firstYear + '–' + lastYear + ' (' + rungCount + ' rungs)' },
+    { label: 'Method', value: method },
+    { sep: true },
+    { label: method === 'Gap'
+        ? 'Bracket years and former gap years rebalanced; other rungs unchanged.'
+        : 'All contiguous rungs in this range are rebalanced.' },
+  ];
+    _infoPopups.duration = buildDurationPopupRows(summary, 'rebal');
     _rebalRunInfo = ' · DARA <b><span class="copy-dara" data-val="' + Math.round(DARA) + '" title="Click to copy">' + esc(Math.round(DARA).toLocaleString()) + '</span></b>'
       + (inferredDARA ? ' <span style="color:#888;font-weight:400">(inferred)</span>' : '')
       + ' · FY ' + firstYear + '–' + lastYear + ', ' + rungCount + ' rungs'
@@ -402,7 +411,7 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
 
     rebalanceRendered = true;
   document.getElementById('output').style.display = 'block';
-  updateStickyTop('simple-table');
+  
 }
 
 // ─── Render Build from Scratch output ────────────────────────────────────────
@@ -419,7 +428,7 @@ function renderBuildOutput({ results, HDR, summary, details }) {
     document.getElementById('net-cash-val').className = 'nc-val';
     document.getElementById('nc-label').textContent = 'Total Cost';
     document.getElementById('net-cash-inline').style.display = '';
-    _infoPopups.duration = buildDurationPopupHTML(summary, 'build');
+    _infoPopups.duration = buildDurationPopupRows(summary, 'build');
     _buildRunInfo = ' · DARA <b>' + esc(Math.round(dara).toLocaleString()) + '</b>'
       + ' · FY ' + firstYear + '–' + lastYear
       + ' · <a class="info-link" data-popup="duration">Duration calcs</a>';
@@ -432,17 +441,21 @@ function renderBuildOutput({ results, HDR, summary, details }) {
 
     buildRendered = true;
   document.getElementById('build-output').style.display = 'block';
-  updateStickyTop('build-table');
+  
 }
 
 // ─── Sticky header helper ─────────────────────────────────────────────────────────
-function updateStickyTop(tableId) {
-  const topRow    = document.getElementById('top-row');
-  const scrollId  = tableId === 'simple-table' ? 'simple-scroll' : 'build-scroll';
-  const scrollWrap = document.getElementById(scrollId);
-  if (!scrollWrap) return;
-  const used = (topRow ? topRow.offsetHeight : 0) + 48;
-  scrollWrap.style.maxHeight = (window.innerHeight - used) + 'px';
+// ─── Sticky scroll height — ResizeObserver keeps it live ──────
+{
+  function _setSH() {
+    const used = document.getElementById('top-row').offsetHeight + 32;
+    ['simple-scroll', 'build-scroll'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.maxHeight = (window.innerHeight - used) + 'px';
+    });
+  }
+  new ResizeObserver(_setSH).observe(document.getElementById('top-row'));
+  window.addEventListener('resize', _setSH);
 }
 
 // ─── Run handler ──────────────────────────────────────────────────────────────
@@ -466,7 +479,9 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       if (isNaN(lastYear)) { setStatus('Invalid Last Year selection.', true); return; }
 
       setStatus('Building ladder…');
-      const result = runBuild({ dara, lastYear, tipsMap, refCPI, settlementDate });
+      const firstYearVal = document.getElementById('first-year').value;
+      const firstYear = firstYearVal ? parseInt(firstYearVal, 10) : undefined;
+      const result = runBuild({ dara, firstYear, lastYear, tipsMap, refCPI, settlementDate });
       renderBuildOutput(result);
       setStatus('');
 
@@ -509,7 +524,7 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 
       let finalDara = dara;
       let portfolioCash = null;
-      if (method === 'Full') {
+      if (method === 'Full' && dara === null) {
         setStatus('Inferring DARA from portfolio cash…');
         ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ holdings, tipsMap, refCPI, settlementDate }));
       }
@@ -578,47 +593,41 @@ let _drillDragging = false;
   });
 }
 
-// ─── Info popover handler ──────────────────────────────────────────────
-{
-  const _ic = document.getElementById('info-card');
-  const _ict = document.getElementById('info-card-title');
-  const _icb = document.getElementById('info-card-content');
-  let _icDrag = false, _icOX = 0, _icOY = 0;
-  document.getElementById('info-card-close').addEventListener('click', () => { _ic.style.display = 'none'; });
-  document.addEventListener('click', e => {
-    const cd = e.target.closest('.copy-dara');
-    if (cd) { navigator.clipboard.writeText(cd.dataset.val); cd.classList.add('copied'); setTimeout(() => cd.classList.remove('copied'), 1200); return; }
-    const link = e.target.closest('.info-link');
-    if (link) {
-      const key = link.dataset.popup;
-      const html = _infoPopups[key];
-      if (html == null) return;
-      const titles = { range: 'Rebalance Range', duration: 'Duration Calculations' };
-      _ict.textContent = titles[key] || key;
-      _icb.innerHTML = html;
-      const rect = link.getBoundingClientRect();
-      _ic.style.display = 'block';
-      const cardW = _ic.offsetWidth;
-      const left = Math.min(rect.left, window.innerWidth - cardW - 16);
-      _ic.style.left = Math.max(16, left) + 'px';
-      _ic.style.top = (rect.bottom + 8) + 'px';
-      e.stopPropagation();
-      return;
-    }
-    if (!_icDrag && e.target.closest('#info-card') == null) _ic.style.display = 'none';
-  });
-  _ict.addEventListener('mousedown', e => {
-    const rect = _ic.getBoundingClientRect();
-    _icOX = e.clientX - rect.left; _icOY = e.clientY - rect.top;
-    _icDrag = true; e.preventDefault();
-  });
-  document.addEventListener('mousemove', e => {
-    if (!_icDrag) return;
-    _ic.style.left = (e.clientX - _icOX) + 'px';
-    _ic.style.top  = (e.clientY - _icOY) + 'px';
-  });
-  document.addEventListener('mouseup', () => { _icDrag = false; });
-}
+// ─── Info-link + header click handler ──────────────────────────────
+const POPUP_TITLES = { range: 'Rebalance Range', duration: 'Duration Calculations' };
+const COL_HELP = {
+  cusip:      [{ label: '9-character bond identifier' }],
+  maturity:   [{ label: 'Bond maturity date' }],
+  fundedYear: [{ label: 'Calendar year this bond’s cash flows are designated to fund' }],
+  amtBefore:  [{ label: 'Annual Real Amount (ARA) — inflation-adjusted funded-year income', note: 'qty × (adjusted principal + own coupon) + coupon income from longer-maturity bonds' }],
+  amtAfter:   [{ label: 'Annual Real Amount (ARA) after rebalance', note: 'qty × (adjusted principal + own coupon) + coupon income from longer-maturity bonds' }],
+  costBefore: [{ label: 'Total purchase cost of current holdings', note: 'qty × cost per bond' }],
+  costAfter:  [{ label: 'Total purchase cost after rebalance', note: 'qty × cost per bond' }],
+  qtyBefore:  [{ label: 'Number of bonds currently held' }],
+  qtyAfter:   [{ label: 'Number of bonds after rebalance' }],
+  qtyDelta:   [{ label: 'Change in quantity (after − before)', note: 'Negative = sell, positive = buy' }],
+  cashDelta:  [{ label: 'Net cash flow from this rung', note: '−(qtyΔ × cost/bond). Negative = cash out.' }],
+  amount:     [{ label: 'Annual Real Amount (ARA) — inflation-adjusted funded-year income', note: 'qty × (adjusted principal + own coupon) + coupon income from longer-maturity bonds' }],
+  cost:       [{ label: 'Total purchase cost for this rung', note: 'qty × cost per bond' }],
+  qty:        [{ label: 'Number of bonds to buy' }],
+};
+document.addEventListener('click', e => {
+  const cd = e.target.closest('.copy-dara');
+  if (cd) { navigator.clipboard.writeText(cd.dataset.val); cd.classList.add('copied'); setTimeout(() => cd.classList.remove('copied'), 1200); return; }
+  const link = e.target.closest('.info-link');
+  if (link) {
+    const key  = link.dataset.popup;
+    const rows = _infoPopups[key];
+    if (rows) showPopup(link, POPUP_TITLES[key] || key, rows);
+    return;
+  }
+  const th = e.target.closest('th[data-col]');
+  if (th) {
+    const rows = COL_HELP[th.dataset.col];
+    if (rows) showPopup(th, th.textContent.trim(), rows);
+    return;
+  }
+});
 
 document.getElementById('simple-table').addEventListener('click', e => {
   const td = e.target.closest('td.drillable');
@@ -645,12 +654,6 @@ document.getElementById('simple-table').addEventListener('click', e => {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 // ─── Method toggle: hide DARA for Full rebalance ───────────────────────────────────────
-function syncDaraVisibility() {
-  const isFull = document.getElementById('method').value === 'Full';
-  const daraField = document.getElementById('dara').closest('.field');
-  daraField.style.display = isFull ? 'none' : '';
-}
-document.getElementById('method').addEventListener('change', syncDaraVisibility);
 
 loadData();
 </script>

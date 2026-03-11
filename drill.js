@@ -276,7 +276,7 @@ export function buildDrillHTML(d, colKey, summary) {
   return '<table style="border-collapse:collapse;width:auto;font-size:12px">' + rows + '</table>';
 }
 
-export function buildDurationPopupHTML(summary, mode) {
+export function buildDurationPopupRows(summary, mode) {
   const lowerYear  = mode === 'rebal' ? summary.brackets.lowerYear  : summary.lowerYear;
   const upperYear  = mode === 'rebal' ? summary.brackets.upperYear  : summary.upperYear;
   const lowerLabel = mode === 'build'
@@ -284,20 +284,20 @@ export function buildDurationPopupHTML(summary, mode) {
   const upperLabel = mode === 'build'
     ? summary.upperMonth + ' ' + upperYear : String(upperYear);
   const { lowerDuration, upperDuration, lowerWeight, upperWeight, gapParams } = summary;
-  const wFml  = '(upper dur − avg dur) / (upper dur − lower dur)';
+  const wFml = '(upper dur − avg dur) / (upper dur − lower dur)';
   const match = lowerWeight.toFixed(4) + ' × ' + lowerDuration.toFixed(2)
               + ' + ' + upperWeight.toFixed(4) + ' × ' + upperDuration.toFixed(2)
               + ' = ' + gapParams.avgDuration.toFixed(2);
-  const rows =
-      row('Gap avg duration', '', gapParams.avgDuration.toFixed(2) + ' yr')
-    + row('Gap years',        '', (summary.gapYears || []).join(', ') || '—')
-    + sep()
-    + row('Lower bracket (' + lowerLabel + ')', 'mod. duration', lowerDuration.toFixed(2) + ' yr')
-    + row('Upper bracket (' + upperLabel + ')', 'mod. duration', upperDuration.toFixed(2) + ' yr')
-    + sep()
-    + row('Lower weight', wFml, lowerWeight.toFixed(4))
-    + row('Upper weight', '1 − lower weight', upperWeight.toFixed(4))
-    + sep()
-    + row('Duration match', '', match, true);
-  return '<table style="border-collapse:collapse;width:100%;font-size:12px">' + rows + '</table>';
+  return [
+    { label: 'Gap avg duration', value: gapParams.avgDuration.toFixed(2) + ' yr' },
+    { label: 'Gap years',        value: (summary.gapYears || []).join(', ') || '—' },
+    { sep: true },
+    { label: 'Lower bracket (' + lowerLabel + ')', note: 'mod. duration', value: lowerDuration.toFixed(2) + ' yr' },
+    { label: 'Upper bracket (' + upperLabel + ')', note: 'mod. duration', value: upperDuration.toFixed(2) + ' yr' },
+    { sep: true },
+    { label: 'Lower weight', note: wFml, value: lowerWeight.toFixed(4) },
+    { label: 'Upper weight', note: '1 − lower weight', value: upperWeight.toFixed(4) },
+    { sep: true },
+    { label: 'Duration match', note: match, total: true },
+  ];
 }
