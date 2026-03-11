@@ -10,3 +10,7 @@ data/*
 !data/RefCPI.csv
 !data/TipsRef.csv
 !data/CusipQtyTest.csv
+
+# Wrangler local state
+.wrangler/
+tips-data-worker/.wrangler/
