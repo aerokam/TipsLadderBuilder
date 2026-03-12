@@ -127,15 +127,41 @@ test('build: pre-ladder interest checkbox visible in Build, hidden in Rebalance'
   await expect(page.locator('#field-pre-ladder')).not.toBeVisible();
 });
 
-test('build: pre-ladder interest checked runs successfully', async ({ page }) => {
+test('build: pre-ladder interest zeroes early years and all row amounts stay near DARA', async ({ page }) => {
+  // Regression guard: zeroed years must show ~DARA (preLadderCredit + laterMatInt),
+  // NOT just laterMatInt (~24k when DARA=100k).
   await page.locator('.mode-btn[data-mode="build"]').click();
+
+  // Pick a firstYear well into the future (~2030) so pool = preLadderYears × annualInt
+  // is large enough to zero at least one funded year.
+  const firstYearSel = page.locator('#first-year');
+  const fyCount = await firstYearSel.locator('option').count();
+  const fyIdx = Math.min(5, fyCount - 1); // option ~2030, or last if fewer options
+  await firstYearSel.selectOption({ index: fyIdx });
+
   const lastYearSel = page.locator('#last-year');
   const optionCount = await lastYearSel.locator('option').count();
   await lastYearSel.selectOption({ index: optionCount - 1 });
+
+  await page.locator('#dara').fill('100000');
   await page.locator('#pre-ladder-interest').check();
   await page.locator('#run-btn').click();
   await expect(page.locator('#build-output')).toHaveCSS('display', 'block', { timeout: 15_000 });
-  expect(await page.locator('#build-table tbody tr').count()).toBeGreaterThan(0);
+
+  // Info strip must mention zeroed years (confirms pre-ladder path ran with zeroing)
+  await expect(page.locator('#info-strip')).toContainText(/zeroed/i);
+
+  // All main-row Amount cells must be ≥ DARA×0.4.
+  // Before fix: zeroed rows showed only laterMatInt (~24k) — far below 40k threshold.
+  const rows = page.locator('#build-table tbody tr:not(.excess-subrow)');
+  const rowCount = await rows.count();
+  for (let i = 0; i < rowCount; i++) {
+    const amtText = await rows.nth(i).locator('td').nth(3).textContent();
+    const amt = parseFloat((amtText ?? '').replace(/[^0-9.-]/g, ''));
+    if (!isNaN(amt) && amt > 0) {
+      expect(amt, `Row ${i} amount ${amt} is unexpectedly low (pre-ladder credit missing?)`).toBeGreaterThan(40000);
+    }
+  }
 });
 
 // ── 5. Help modal ─────────────────────────────────────────────────────────────

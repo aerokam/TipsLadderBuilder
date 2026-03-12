@@ -176,7 +176,10 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     const halfOrFull = monthF < 7 ? 0.5 : 1.0;
     const principalPerBond     = 1000 * ir;
     const ownRungCouponPerBond = principalPerBond * (bond.coupon ?? 0) * halfOrFull;
-    const fundedYearAmt = fundedYearQty * prelim[year].pi + prelim[year].laterMatInt;
+    const preLadderCreditForYear = isZeroed
+      ? Math.max(0, dara - prelim_lmi)
+      : year === partialCreditYear ? partialCredit : 0;
+    const fundedYearAmt = fundedYearQty * prelim[year].pi + prelim_lmi + preLadderCreditForYear;
     const exAmt  = isBracket ? excessQty * prelim[year].pi : '';
     const fundedYearCost = fundedYearQty * cpb;
     const exCost = isBracket ? excessQty * cpb : '';
@@ -206,6 +209,7 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
       dara,
       fundedYearQty: fundedYearQty,
       fundedYearLaterMatInt: prelim[year].laterMatInt,
+      preLadderCreditForYear,
       fundedYearPi: prelim[year].pi,
       fundedYearPrincipalTotal: fundedYearQty * principalPerBond,
       fundedYearOwnRungInt: fundedYearQty * ownRungCouponPerBond,

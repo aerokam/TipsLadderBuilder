@@ -600,7 +600,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
       }
 
       postRebalQty = isBracket
-        ? targetFYQty + Math.round(bracketExcessTarget[year] / costPerBond)
+        ? targetFYQty + Math.max(0, Math.round(bracketExcessTarget[year] / costPerBond))
         : targetFYQty;
 
       buySellTargets[year] = {

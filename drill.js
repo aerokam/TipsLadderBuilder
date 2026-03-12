@@ -42,6 +42,10 @@ export function buildDrillHTML(d, colKey, summary) {
 
   // \u2500\u2500 Build: Amount \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   if (colKey === 'amount') {
+    const _plCredit  = d.preLadderCreditForYear || 0;
+    const _totalFmla = _plCredit > 0
+      ? 'Principal + Coupons + Later mat int + Pre-ladder credit'
+      : 'Principal + Coupons + Later mat int';
     rows =
       bondVarRows(d, nPeriods, principalPerBond, couponPct) +
       sep() +
@@ -49,8 +53,9 @@ export function buildDrillHTML(d, colKey, summary) {
       row('Principal', 'principal/bond \xd7 qty', fm(d.fundedYearPrincipalTotal)) +
       row(couponLabel, 'principal/bond \xd7 coupon/period \xd7 periods \xd7 qty', fm(d.fundedYearOwnRungInt)) +
       row('Later maturity interest', 'from bonds maturing after ' + d.fundedYear, fm(d.fundedYearLaterMatInt)) +
+      (_plCredit > 0 ? row('Pre-ladder credit', 'pre-ladder pool applied to this year', fm(_plCredit)) : '') +
       sep() +
-      row('Funded Year Amount', 'Principal + Coupons + Later mat int', fm(d.fundedYearAmt), true) +
+      row('Funded Year Amount', _totalFmla, fm(d.fundedYearAmt), true) +
       sep() +
       row('DARA', '', fm(d.dara)) +
       row('Surplus / Deficit', 'FY Amount \u2212 DARA', (d.fundedYearAmt - d.dara >= 0 ? '+' : '') + Math.round(d.fundedYearAmt - d.dara).toLocaleString('en-US'));
@@ -278,6 +283,7 @@ export function buildDurationPopupRows(summary, mode) {
   if (is3) {
     const { newLowerYear, newLowerDuration, origLowerWeight, newLowerWeight3 } = summary;
     const w1 = (origLowerWeight ?? 0), w2 = (newLowerWeight3 ?? 0), w3 = upperWeight ?? 0;
+    const infeasible = w3 < 0 || w1 > 1;
     const match = w1.toFixed(4) + ' × ' + lowerDuration.toFixed(2)
                 + ' + ' + w2.toFixed(4) + ' × ' + newLowerDuration.toFixed(2)
                 + ' + ' + w3.toFixed(4) + ' × ' + upperDuration.toFixed(2)
@@ -294,7 +300,9 @@ export function buildDurationPopupRows(summary, mode) {
       { label: 'New lower weight',  note: 'solved from duration constraint',          value: w2.toFixed(4) },
       { label: 'Upper weight',      note: '1 − w1 − w2',                             value: w3.toFixed(4) },
       { sep: true },
-      { label: 'Duration match', note: match, total: true },
+      ...(infeasible
+        ? [{ label: 'Infeasible', note: 'Orig lower excess alone exceeds gap cost (w1 > 1). No new lower/upper excess bought. Duration match is approximate.', total: true }]
+        : [{ label: 'Duration match', note: match, total: true }]),
     ];
   }
 
