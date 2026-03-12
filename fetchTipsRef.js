@@ -11,6 +11,29 @@ const URL = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/
   '&fields=cusip,ref_cpi_on_dated_date,dated_date,maturity_date,security_term,int_rate' +
   '&page[number]=1&page[size]=150';
 
+async function uploadToR2(key, body) {
+  const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+  const {
+    CLOUDFLARE_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY,
+    R2_BUCKET,
+  } = process.env;
+
+  if (!CLOUDFLARE_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
+    throw new Error('Cloudflare R2 credentials not found in environment variables (CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET).');
+  }
+
+  const s3 = new S3Client({
+    region: 'auto',
+    endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
+  });
+
+  await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: body, ContentType: 'text/csv' }));
+  console.error(`Wrote ${body.trim().split('\n').length - 1} rows → R2 bucket "${R2_BUCKET}", key "${key}"`);
+}
+
 async function fetchTipsRef() {
   console.error('Fetching TIPS base CPI from Treasury FiscalData...');
   const res = await fetch(URL);
@@ -45,17 +68,13 @@ async function main() {
     console.log(`Coupon:     ${(row.coupon * 100).toFixed(3)}%`);
     console.log(`Base CPI:   ${row.baseCpi.toFixed(5)}`);
   } else {
-    // Write data/TipsRef.csv
-    const fs = await import('fs');
-    const path = await import('path');
-    const outPath = path.join(__dirname, 'data', 'TipsRef.csv');
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    // Write TipsRef.csv to R2
     const header = 'cusip,maturity,datedDate,coupon,baseCpi,term';
     const lines = rows.map(r =>
       `${r.cusip},${r.maturity},${r.datedDate},${r.coupon},${r.baseCpi},${r.term}`
     );
-    fs.writeFileSync(outPath, [header, ...lines].join('\n') + '\n');
-    console.error(`Wrote ${rows.length} rows → ${outPath}`);
+    const body = [header, ...lines].join('\n') + '\n';
+    await uploadToR2('TIPS/TipsRef.csv', body);
   }
 }
 

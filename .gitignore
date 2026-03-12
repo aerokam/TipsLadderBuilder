@@ -6,6 +6,7 @@ memory/
 
 # Data
 data/
+!data/CusipQtyTestLumpy.csv
 
 # Wrangler local state
 .wrangler/

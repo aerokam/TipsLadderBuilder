@@ -11,6 +11,29 @@
 
 const CUSIP = '912810FD5';
 
+async function uploadToR2(key, body) {
+  const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+  const {
+    CLOUDFLARE_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY,
+    R2_BUCKET,
+  } = process.env;
+
+  if (!CLOUDFLARE_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
+    throw new Error('Cloudflare R2 credentials not found in environment variables (CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET).');
+  }
+
+  const s3 = new S3Client({
+    region: 'auto',
+    endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
+  });
+
+  await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: body, ContentType: 'text/csv' }));
+  console.error(`Wrote ${body.trim().split('\n').length - 1} rows → R2 bucket "${R2_BUCKET}", key "${key}"`);
+}
+
 async function fetchRefCpi() {
   const url = 'https://www.treasurydirect.gov/TA_WS/secindex/search' +
     `?cusip=${CUSIP}&format=jsonp&callback=jQuery_CUSIP_FETCHER` +
@@ -45,17 +68,11 @@ async function main() {
   }
 
   if (arg === '--write') {
-    // Write all rows to data/RefCPI.csv
-    const fs   = await import('fs');
-    const path = await import('path');
-    const { fileURLToPath } = await import('url');
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const outPath = path.join(__dirname, 'data', 'RefCPI.csv');
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    // Write all rows to RefCPI.csv in R2
     const header = 'date,refCpi';
     const lines = rows.map(r => `${r.date},${r.refCpi}`);
-    fs.writeFileSync(outPath, [header, ...lines].join('\n') + '\n');
-    console.error(`Wrote ${rows.length} rows → ${outPath}`);
+    const body = [header, ...lines].join('\n') + '\n';
+    await uploadToR2('TIPS/RefCPI.csv', body);
   } else if (arg) {
     // Find exact match or nearest prior date
     const matches = rows.filter(r => r.date <= arg);
