@@ -5,8 +5,6 @@
 // Usage: node getTipsYields.js
 // Prices published once daily at ~1pm ET on FedInvest; scheduled job runs at 1:00 and 1:05 PM ET.
 
-console.log('DEBUG: Running updated getTipsYields.js (R2 version) - ' + new Date().toISOString());
-
 const FEDINVEST_URL = 'https://www.treasurydirect.gov/GA-FI/FedInvest/todaySecurityPriceDetail';
 
 async function uploadToR2(key, body) {
