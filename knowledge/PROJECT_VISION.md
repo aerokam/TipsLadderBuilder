@@ -10,11 +10,11 @@ A web-based tool for building and rebalancing TIPS (Treasury Inflation-Protected
 
 Both core modes are shipped and operational:
 
-- **Build**: Given a DARA and time horizon, constructs a fresh TIPS ladder with duration-matching excess for gap years
+- **Build**: Given a DARA and time horizon, constructs a fresh TIPS ladder with duration-matching excess for gap years (2037–2039)
 - **Rebalance**: Given current holdings, computes trades needed to realign the ladder — either gap-only (fill newly-available maturities from bracket proceeds) or full (rebuild from current portfolio cash at inferred DARA)
 
 The UI provides:
-- Main table: CUSIP/Maturity/FY rows with bracket rows split into FY portion (main row) + Gap portion (sub-row)
+- Main table: CUSIP/Maturity/Funded Year rows with bracket rows split into funded year portion (main row) + Gap portion (sub-row)
 - Drill-down popups on key cells showing the full calculation chain
 - Parameters bar and net cash/market value callout
 - Frozen headers and totals row
@@ -44,10 +44,10 @@ They are the same algorithm — both do a longest-to-shortest ladder sweep, both
 The ideal UX is a layered drill-down:
 
 1. **Summary view**: Total portfolio value, net cash impact, ARA vs DARA gap
-2. **Ladder table**: Per-rung view with FY/Gap split for bracket years
+2. **Ladder table**: Per-rung view with funded year/Gap split for bracket years
 3. **Cell popup**: Full calculation chain for any value (current)
 4. **Deep drill**: Sub-popups for components — e.g., click "Later Maturity Interest" in an ARA popup to see the running pool breakdown; click a duration to see the yield curve and interpolation
-5. **Weight rationale**: Visual showing gap year duration and how brackets bracket it
+5. **Weight rationale**: Visual showing gap years' average duration and how brackets bracket it
 
 This positions the tool as educational infrastructure for understanding TIPS ladders, not just a trade calculator.
 
