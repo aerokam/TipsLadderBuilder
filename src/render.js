@@ -72,11 +72,11 @@ export const COLS = [
     drill: true, drillCond: v => typeof v === 'number' && v > 0 },
 
   { label: 'Qty Delta',     key: 'qtyDelta',   fmt: 'sgn', rebalOnly: true,
-    value:    d => d.qtyAfter - d.qtyBefore,
+    value:    d => d.fundedYearQtyAfter - d.fundedYearQtyBefore,
     subValue: d => d.excessQtyAfter - d.excessQtyBefore },
 
   { label: 'Cash Delta',    key: 'cashDelta',  fmt: 'sgn', rebalOnly: true,
-    value:    d => -((d.qtyAfter - d.qtyBefore) * d.costPerBond),
+    value:    d => -((d.fundedYearQtyAfter - d.fundedYearQtyBefore) * d.costPerBond),
     subValue: d => -((d.excessQtyAfter - d.excessQtyBefore) * d.costPerBond),
     subDrillKey: 'gapCashDelta',
     total: true, totalFn: d => -((d.qtyAfter - d.qtyBefore) * d.costPerBond),

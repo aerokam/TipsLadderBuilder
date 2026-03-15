@@ -1,12 +1,11 @@
 name: Get TIPS Yields
 
 # FedInvest publishes prices once daily at ~1pm ET, Mon-Fri (non-holidays).
-# ET = UTC-5 (EST) or UTC-4 (EDT); both hours covered below.
+# ET = UTC-4 (EDT, Mar–Nov); cron runs at 17:00 UTC = 1:00 PM EDT.
 
 on:
   schedule:
     - cron: '0 17 * * 1-5'   # 1:00 PM EDT (UTC-4)
-    - cron: '0 18 * * 1-5'   # 1:00 PM EST (UTC-5)
   workflow_dispatch:
 
 env:

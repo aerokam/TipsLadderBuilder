@@ -426,7 +426,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
         const ir = refCPI / (b?.baseCpi ?? refCPI);
         const ap = 1000 * ir;
         const isBT = (bracketYearSet.has(year) && h.cusip === buySellTargets[year]?.targetCUSIP);
-        const q = isBT ? bracketTargetFundedYearQtyBefore[year] : h.qty;
+        const q = isBT ? Math.min(bracketTargetFundedYearQtyBefore[year] ?? 0, h.qty) : h.qty;
         const m = h.maturity.getMonth() + 1;
         pB += q * ap; cB += q * ap * b.coupon * (m < 7 ? 0.5 : 1.0);
       }
@@ -523,7 +523,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
       coupon: b.coupon, price: b.price, baseCpi: b.baseCpi, refCPI, indexRatio: ir,
       principalPerBond: 1000 * ir, costPerBond: (b.price / 100 * ir * 1000),
       qtyBefore: h.qty, qtyAfter: tQ,
-      fundedYearQtyBefore: isBT ? bracketTargetFundedYearQtyBefore[h.year] : h.qty,
+      fundedYearQtyBefore: isBT ? Math.min(bracketTargetFundedYearQtyBefore[h.year] ?? 0, h.qty) : h.qty,
       fundedYearQtyAfter: tFundedYearQty,
       excessQtyBefore: exB, excessQtyAfter: exA,
       araBeforeTotal: isLast ? aB : null, araAfterTotal: isLast ? aA : null,

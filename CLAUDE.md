@@ -64,7 +64,6 @@ Before touching any displayed value: read the relevant knowledge doc first.
 
 - **R2 bucket**: `https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS/` — files: `TipsYields.csv`, `RefCPI.csv`, `TipsRef.csv`
 - **GitHub Actions**: daily yield fetch (`get-tips-yields.yml`), monthly CPI fetch (`fetch-ref-cpi.yml`)
-- **DST note**: After Mar 8 2026, change `0 18` → `0 17` in `get-tips-yields.yml`
 
 ### Naming Conventions
 
