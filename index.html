@@ -129,15 +129,18 @@
 912828S50,50
 91282CEJ6,30
 912810QF8,100</pre>
-    <p><b>DARA</b> — Leave blank to auto-infer from holdings.</p>
+    <p><b>DARA</b> — Leave blank to auto-infer from holdings. After entering a value, a per-year table appears where you can set a different target for individual funded years. The DARA field shows <b style="color:#7c3aed">by year</b> when any year's target differs from the default.</p>
     <p><b>Method</b> — <i>Gap</i>: rebalances only the bracket years and previous gap years (sells excess from brackets, buys into previous gap years). <i>Full</i>: rebalances all rungs across the full contiguous ladder range.</p>
     <p><b>Output (Simple tab)</b> — CUSIP · Maturity · FY · Qty · Target · Delta · Cash Δ. No-change rows dimmed; bracket rows blue.<br>
     <b>Output (Detail tab)</b> — Full computation with ARA before/after, later maturity interest, weights.</p>
     <p><b>Net Cash</b> — Net proceeds (sells minus buys). Negative = net purchase.</p>
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Mode: Build</h3>
-    <p>Designs a new TIPS ladder from scratch with zero existing holdings. Currently uses the latest-maturing TIPS in each funded year.</p>
-    <p><b>DARA</b> (required) — Enter any amount; up/down arrows adjust in $1,000 increments for convenience. <b>Last Year</b> — Final funded year; first year is always the current calendar year.</p>
+    <p>Designs a new TIPS ladder from scratch with zero existing holdings.</p>
+    <p><b>DARA</b> (required) — Enter your target annual real income. After entering a value, a per-year table appears where you can override the target for individual funded years. The DARA field shows <b style="color:#7c3aed">by year</b> when any year's target differs from the default.</p>
+    <p><b>First Year / Last Year</b> — Range of funded years. First year defaults to the current calendar year. The per-year DARA table updates automatically when you change the range, preserving any custom values already entered.</p>
+    <p><b>Maturity pick</b> — <i>Last</i>: use the latest-maturing TIPS in each year (default). <i>First</i>: use the earliest-maturing TIPS.</p>
+    <p><b>Pre-ladder interest</b> — If checked, coupon income received before the ladder starts (during the years between today and the first funded year) is applied to reduce the quantity needed for the earliest rungs.</p>
     <p><b>Output columns:</b><br>
     <b>FY Qty</b> — bonds for the rung · <b>Excess Qty</b> — extra bonds in bracket years · <b>Total Qty</b> — sum<br>
     <b>FY Amount</b> ≈ DARA · <b>FY Cost</b> — cost of FY bonds<br>
@@ -189,7 +192,13 @@
       </div>
       <div class="field">
         <label>DARA ($)</label>
-        <input type="number" id="dara" placeholder="auto-infer" step="1" min="0" style="width:110px">
+        <div style="display:flex;align-items:center;gap:2px">
+          <input type="text" id="dara" placeholder="auto-infer" style="width:90px">
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <button type="button" id="dara-inc" title="+$1,000" style="font-size:9px;padding:0 5px;height:13px;line-height:1;border:1px solid #ccc;border-radius:2px 2px 0 0;background:#f8fafc;cursor:pointer;color:#475569">▲</button>
+            <button type="button" id="dara-dec" title="-$1,000" style="font-size:9px;padding:0 5px;height:13px;line-height:1;border:1px solid #ccc;border-radius:0 0 2px 2px;background:#f8fafc;cursor:pointer;color:#475569">▼</button>
+          </div>
+        </div>
       </div>
       <div class="field" id="field-method">
         <label>Method</label>
@@ -539,17 +548,51 @@ function renderBuildOutput({ results, HDR, summary, details }) {
 
 // ─── Per-year DARA panel ──────────────────────────────────────────────────────
 let _daraByYearPanelDefault = null;
+let _daraByYearStore = new Map();  // year → value; persists across year-range changes
+let _lastKnownDara = null;          // last DARA used (including auto-inferred)
+
+function _daraByYearRow(y, val) {
+  return '<tr><td style="text-align:center">' + y + '</td>'
+    + '<td style="text-align:right"><input type="number" value="' + val + '" step="1000" min="0" data-year="' + y + '"'
+    + ' style="width:100px;text-align:right;border:1px solid #ccc;border-radius:3px;padding:2px 4px;font-size:12px;font-variant-numeric:tabular-nums"></td></tr>';
+}
+
+// Returns the numeric default DARA — handles 'by year' state where input holds text
+function _getDefaultDara() {
+  const v = document.getElementById('dara').value.trim();
+  return v === 'by year' ? (_daraByYearPanelDefault ?? NaN) : parseFloat(v);
+}
+
+// True if any per-year store entry differs from the current default (panel need not be visible)
+function _hasCustomDara() {
+  if (_daraByYearPanelDefault == null) return false;
+  for (const v of _daraByYearStore.values()) {
+    if (v !== _daraByYearPanelDefault) return true;
+  }
+  return false;
+}
+
+// Shows 'by year' inside the DARA input whenever custom per-year values exist
+function updateDaraInput() {
+  const inp = document.getElementById('dara');
+  if (document.activeElement === inp) return;  // don't interfere while user is typing
+  if (_hasCustomDara()) {
+    inp.value = 'by year';
+  } else if (inp.value === 'by year') {
+    inp.value = _daraByYearPanelDefault != null ? String(_daraByYearPanelDefault) : '';
+  }
+}
 
 function renderDaraByYearPanel() {
-  const daraVal = document.getElementById('dara').value.trim();
-  const panel   = document.getElementById('dara-by-year');
-  if (!daraVal || !tipsMap) { panel.style.display = 'none'; _daraByYearPanelDefault = null; return; }
-  const defaultDara = parseFloat(daraVal);
-  if (isNaN(defaultDara) || defaultDara <= 0) { panel.style.display = 'none'; _daraByYearPanelDefault = null; return; }
+  const panel       = document.getElementById('dara-by-year');
+  const defaultDara = _getDefaultDara();
+  if (!tipsMap || isNaN(defaultDara) || defaultDara <= 0) {
+    panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return;
+  }
 
   let years = [];
   if (currentMode === 'rebalance') {
-    if (!currentHoldingsArray) { panel.style.display = 'none'; _daraByYearPanelDefault = null; return; }
+    if (!currentHoldingsArray) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
     const yearSet = new Set();
     for (const h of currentHoldingsArray) {
       const bond = tipsMap.get(h.cusip);
@@ -559,8 +602,9 @@ function renderDaraByYearPanel() {
   } else {
     const firstYearVal = document.getElementById('first-year').value;
     const lastYearVal  = document.getElementById('last-year').value;
-    if (!firstYearVal || !lastYearVal) { panel.style.display = 'none'; _daraByYearPanelDefault = null; return; }
-    const fy = parseInt(firstYearVal, 10), ly = parseInt(lastYearVal, 10);
+    if (!lastYearVal) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
+    const fy = firstYearVal ? parseInt(firstYearVal, 10) : settlementDate.getFullYear();
+    const ly = parseInt(lastYearVal, 10);
     const yearSet = new Set();
     for (const bond of tipsMap.values()) {
       if (bond.maturity && bond.maturity > settlementDate) {
@@ -570,56 +614,34 @@ function renderDaraByYearPanel() {
     }
     years = [...yearSet].sort((a, b) => a - b);
   }
-  if (!years.length) { panel.style.display = 'none'; _daraByYearPanelDefault = null; return; }
+  if (!years.length) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
 
   const tableEl = document.getElementById('dara-by-year-table');
 
-  // If panel already visible: check whether year set has changed
   if (panel.style.display !== 'none' && _daraByYearPanelDefault !== null) {
+    // Panel already visible: sync store — entries at prev default → new default
     const prevDefault = _daraByYearPanelDefault;
-    const existingInputs = [...tableEl.querySelectorAll('input[data-year]')];
-    const existingYears  = new Set(existingInputs.map(inp => parseInt(inp.dataset.year, 10)));
-    const newYearSet     = new Set(years);
-    const yearSetChanged = years.length !== existingYears.size || years.some(y => !existingYears.has(y));
-
-    if (!yearSetChanged) {
-      // Same years: only update inputs still at the previous default
-      for (const inp of existingInputs) {
-        if (parseFloat(inp.value) === prevDefault) inp.value = defaultDara;
+    if (prevDefault !== defaultDara) {
+      for (const [yr, v] of _daraByYearStore) {
+        if (v === prevDefault) _daraByYearStore.set(yr, defaultDara);
       }
-      _daraByYearPanelDefault = defaultDara;
-      return;
     }
-
-    // Year set changed: preserve user-edited values for years still in new range
-    const savedValues = {};
-    for (const inp of existingInputs) {
-      const yr = parseInt(inp.dataset.year, 10);
-      if (newYearSet.has(yr)) savedValues[yr] = parseFloat(inp.value);
-    }
-
-    tableEl.querySelector('tbody').innerHTML = years.map(y => {
-      const val = savedValues[y] !== undefined ? savedValues[y] : defaultDara;
-      return '<tr><td style="text-align:center">' + y + '</td>'
-        + '<td style="text-align:right"><input type="number" value="' + val + '" step="1000" min="0" data-year="' + y + '"'
-        + ' style="width:100px;text-align:right;border:1px solid #ccc;border-radius:3px;padding:2px 4px;font-size:12px;font-variant-numeric:tabular-nums"></td></tr>';
-    }).join('');
     _daraByYearPanelDefault = defaultDara;
+    tableEl.querySelector('tbody').innerHTML = years.map(y =>
+      _daraByYearRow(y, _daraByYearStore.get(y) ?? defaultDara)
+    ).join('');
+    updateDaraInput();
     return;
   }
 
-  // Fresh render: all cells initialised to defaultDara
+  // Fresh render
   tableEl.innerHTML =
     '<thead><tr>'
     + '<th style="text-align:left;cursor:default;white-space:nowrap">Funded<br>Year</th>'
     + '<th style="cursor:default">DARA ($)</th>'
     + '</tr></thead>'
     + '<tbody>'
-    + years.map(y =>
-        '<tr><td style="text-align:center">' + y + '</td>'
-        + '<td style="text-align:right"><input type="number" value="' + defaultDara + '" step="1000" min="0" data-year="' + y + '"'
-        + ' style="width:100px;text-align:right;border:1px solid #ccc;border-radius:3px;padding:2px 4px;font-size:12px;font-variant-numeric:tabular-nums"></td></tr>'
-      ).join('')
+    + years.map(y => _daraByYearRow(y, _daraByYearStore.get(y) ?? defaultDara)).join('')
     + '</tbody>';
 
   _daraByYearPanelDefault = defaultDara;
@@ -628,6 +650,7 @@ function renderDaraByYearPanel() {
   document.getElementById('build-output').style.display = 'none';
   document.getElementById('export-csv-btn').style.display = 'none';
   document.getElementById('net-cash-inline').style.display = 'none';
+  updateDaraInput();
 }
 
 function getDaraByYear() {
@@ -642,6 +665,64 @@ function getDaraByYear() {
   return map.size > 0 ? map : null;
 }
 
+// Update store on every keystroke in the per-year table
+document.getElementById('dara-by-year-table').addEventListener('input', e => {
+  const inp = e.target.closest('input[data-year]');
+  if (!inp) return;
+  const yr = parseInt(inp.dataset.year, 10);
+  const v  = parseFloat(inp.value);
+  if (!isNaN(v) && v >= 0) _daraByYearStore.set(yr, v);
+  updateDaraInput();
+});
+
+// When user focuses the DARA field: open per-year panel; populate from last known if empty
+document.getElementById('dara').addEventListener('focus', () => {
+  const inp = document.getElementById('dara');
+  if (inp.value === 'by year') {
+    renderDaraByYearPanel();  // keep panel open using stored default before clearing text
+    inp.value = '';
+  } else {
+    if (!inp.value.trim()) inp.value = _lastKnownDara ? String(_lastKnownDara) : '10000';
+    inp.select();
+    renderDaraByYearPanel();
+  }
+});
+
+// After user leaves the DARA field, re-evaluate 'by year' state
+document.getElementById('dara').addEventListener('blur', updateDaraInput);
+
+// Shared step logic for ▲/▼ buttons and ArrowUp/Down keys
+function _daraStep(delta) {
+  const inp = document.getElementById('dara');
+  // Seed _daraByYearPanelDefault from current input if not yet set
+  if (_daraByYearPanelDefault == null) {
+    const cur = parseFloat(inp.value);
+    if (isNaN(cur)) return;
+    _daraByYearPanelDefault = cur;
+  }
+  const oldDefault = _daraByYearPanelDefault;
+  const newDara    = Math.max(1000, oldDefault + delta);
+  for (const [yr, v] of _daraByYearStore) {
+    if (v === oldDefault) _daraByYearStore.set(yr, newDara);
+  }
+  _daraByYearPanelDefault = newDara;
+  const panel = document.getElementById('dara-by-year');
+  if (panel.style.display !== 'none') {
+    for (const i of document.querySelectorAll('#dara-by-year-table input[data-year]')) {
+      i.value = _daraByYearStore.get(parseInt(i.dataset.year, 10)) ?? newDara;
+    }
+  }
+  inp.value = String(newDara);
+}
+
+document.getElementById('dara').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  _daraStep(e.key === 'ArrowUp' ? 1000 : -1000);
+});
+document.getElementById('dara-inc').addEventListener('click', () => { _daraStep(1000);  document.getElementById('dara').focus(); });
+document.getElementById('dara-dec').addEventListener('click', () => { _daraStep(-1000); document.getElementById('dara').focus(); });
+
 document.getElementById('dara').addEventListener('input', renderDaraByYearPanel);
 
 // ─── Run handler ──────────────────────────────────────────────────────────────
@@ -654,10 +735,9 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 
     if (currentMode === 'build') {
       // ── Build from Scratch ──
-      const daraInput = document.getElementById('dara').value.trim();
-      if (!daraInput) { setStatus('DARA is required for Build from Scratch.', true); return; }
-      const dara = parseFloat(daraInput);
-      if (isNaN(dara) || dara <= 0) { setStatus('DARA must be a positive number.', true); return; }
+      const dara = _getDefaultDara();
+      if (!dara || isNaN(dara) || dara <= 0) { setStatus('DARA is required for Build from Scratch.', true); return; }
+      if (dara < 1000) { setStatus('DARA must be at least $1,000.', true); return; }
 
       const lastYearVal = document.getElementById('last-year').value;
       if (!lastYearVal) { setStatus('Please select a Last Year.', true); return; }
@@ -671,7 +751,9 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       const preLadderInterest = document.getElementById('pre-ladder-interest').checked;
       const daraByYear = getDaraByYear();
       const result = runBuild({ dara, firstYear, lastYear, tipsMap, refCPI, settlementDate, maturityPref, preLadderInterest, daraByYear });
+      _lastKnownDara = dara;
       document.getElementById('dara-by-year').style.display = 'none';
+      updateDaraInput();
       renderBuildOutput(result);
       setStatus('');
 
@@ -679,8 +761,9 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       // ── Rebalance ──
       if (!currentHoldingsArray) { setStatus('Please select a valid holdings CSV file.', true); return; }
 
-      const daraInput = document.getElementById('dara').value.trim();
-      const dara      = daraInput ? parseFloat(daraInput) : null;
+      const _daraRaw = _getDefaultDara();
+      const dara     = isNaN(_daraRaw) ? null : _daraRaw;
+      if (dara !== null && dara < 1000) { setStatus('DARA must be at least $1,000.', true); return; }
       const method       = document.getElementById('method').value;
       const bracketMode  = document.getElementById('bracket-mode').value;
 
@@ -695,11 +778,17 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       if (method === 'Full' && dara === null) {
         setStatus('Inferring DARA from portfolio cash…');
         ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ bracketMode, holdings, tipsMap, refCPI, settlementDate }));
+        finalDara = Math.round(finalDara / 1000) * 1000;
+        document.getElementById('dara').value = String(finalDara);
+        _daraByYearPanelDefault = finalDara;
+        for (const [yr] of _daraByYearStore) _daraByYearStore.set(yr, finalDara);
       }
+      _lastKnownDara = finalDara;
       setStatus('Running rebalance…');
       const daraByYear = getDaraByYear();
       const result = runRebalance({ dara: finalDara, method, bracketMode, holdings, tipsMap, refCPI, settlementDate, daraByYear });
       document.getElementById('dara-by-year').style.display = 'none';
+      updateDaraInput();
       renderOutput(result, portfolioCash);
       setStatus('');
     }

@@ -239,3 +239,118 @@ test('build: running without selecting last year shows status error', async ({ p
   await page.locator('#run-btn').click();
   await expect(page.locator('#status')).toContainText(/year/i);
 });
+
+// ── 9. Low-DARA edge cases ────────────────────────────────────────────────────
+test('build: DARA below $1,000 is rejected before running', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+  await page.locator('#dara').fill('500');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#status')).toContainText(/1,000/i);
+});
+
+test('build: DARA $2,000 either renders table or shows DARA-too-low error with no crash', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+  await page.locator('#dara').fill('2000');
+  await page.locator('#run-btn').click();
+
+  // Must not leave the page in a broken state — either table renders or a clear error appears
+  const tableVisible = await page.locator('#build-output').isVisible().catch(() => false);
+  const statusText   = await page.locator('#status').textContent().catch(() => '');
+  expect(tableVisible || /dara|too low/i.test(statusText)).toBeTruthy();
+
+  // If table rendered: all Funded Year Amount cells must be non-negative
+  if (tableVisible) {
+    const rows = page.locator('#build-table tbody tr:not(.excess-subrow)');
+    const rowCount = await rows.count();
+    for (let i = 0; i < rowCount; i++) {
+      const amtText = await rows.nth(i).locator('td').nth(3).textContent();
+      const amt = parseFloat((amtText ?? '').replace(/[^0-9.-]/g, ''));
+      if (!isNaN(amt)) expect(amt, `Row ${i} amount ${amt} is negative`).toBeGreaterThanOrEqual(0);
+    }
+  }
+});
+
+test('rebalance: DARA below $1,000 is rejected', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('500');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#status')).toContainText(/1,000/i);
+});
+
+// ── 10. No NaN in output ─────────────────────────────────────────────────────
+async function assertNoNaN(page, tableSelector) {
+  const cells = page.locator(tableSelector + ' td');
+  const count = await cells.count();
+  for (let i = 0; i < count; i++) {
+    const text = (await cells.nth(i).textContent()) ?? '';
+    expect(text, `Cell ${i} in ${tableSelector} contains NaN`).not.toContain('NaN');
+  }
+}
+
+test('rebalance: no NaN in table cells or drill popup (auto-infer DARA)', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  await assertNoNaN(page, '#simple-table');
+
+  const drillCell = page.locator('#simple-table tbody td[data-col]').first();
+  await drillCell.click();
+  await expect(page.locator('#drill-overlay')).toBeVisible({ timeout: 5_000 });
+  expect(await page.locator('#drill-content').textContent()).not.toContain('NaN');
+  await page.locator('#drill-close').click();
+});
+
+test('rebalance: no NaN in table cells at low DARA ($5,000)', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('5000');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  await assertNoNaN(page, '#simple-table');
+});
+
+test('build: no NaN in table cells or drill popup', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#build-output')).toHaveCSS('display', 'block', { timeout: 15_000 });
+  await assertNoNaN(page, '#build-table');
+
+  const drillCell = page.locator('#build-table tbody td[data-col]').first();
+  await drillCell.click();
+  await expect(page.locator('#drill-overlay')).toBeVisible({ timeout: 5_000 });
+  expect(await page.locator('#drill-content').textContent()).not.toContain('NaN');
+  await page.locator('#drill-close').click();
+});
+
+test('rebalance: no negative Qty After values at low DARA', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('5000');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table')).toBeVisible({ timeout: 15_000 });
+
+  // Find the Qty After column index from the header row
+  const headers = page.locator('#simple-table thead th');
+  const headerCount = await headers.count();
+  let qtyAfterIdx = -1;
+  for (let i = 0; i < headerCount; i++) {
+    const text = (await headers.nth(i).textContent() ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (text.includes('qty') && text.includes('after')) { qtyAfterIdx = i; break; }
+  }
+  expect(qtyAfterIdx, 'Qty After column not found in table header').toBeGreaterThanOrEqual(0);
+
+  const rows = page.locator('#simple-table tbody tr');
+  const rowCount = await rows.count();
+  for (let i = 0; i < rowCount; i++) {
+    const cellText = await rows.nth(i).locator('td').nth(qtyAfterIdx).textContent().catch(() => '');
+    const val = parseFloat((cellText ?? '').replace(/[^0-9.-]/g, ''));
+    if (!isNaN(val)) expect(val, `Row ${i} Qty After = ${val} is negative`).toBeGreaterThanOrEqual(0);
+  }
+});

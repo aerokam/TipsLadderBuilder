@@ -108,7 +108,8 @@ export function buildDrillHTML(d, colKey, summary) {
     const laterMatInt = isBef ? d.araBeforeLaterMatInt : d.araAfterLaterMatInt;
     const araTotal    = isBef ? d.araBeforeTotal       : d.araAfterTotal;
     const couponLbl   = nPeriods === 1 ? 'Last coupon (1 period)' : 'Last 2 coupons (2 periods)';
-    const araQty      = isBef ? d.qtyBefore : d.qtyAfter;
+    const araQty      = isBef ? d.fundedYearQtyBefore : d.fundedYearQtyAfter;
+    const DARA        = d.DARA ?? summary?.DARA;
     rows = bondVarRows(d, nPeriods, principalPerBond, couponPct) + sep()
       + row('Qty', '', araQty + ' bonds')
       + row('Principal', 'principal/bond \xd7 qty', fm(principal))
@@ -117,13 +118,14 @@ export function buildDrillHTML(d, colKey, summary) {
       + sep()
       + row(isBef ? 'Amount Before' : 'Amount After', 'Principal + Coupons + Later mat int', fm(araTotal), true)
       + sep()
-      + row('DARA', '', fm(d.DARA))
+      + row('DARA', '', fm(DARA))
       + row('Surplus / Deficit', (isBef ? 'Amount Before' : 'Amount After') + ' \u2212 DARA',
-            (araTotal - d.DARA >= 0 ? '+' : '') + Math.round(araTotal - d.DARA).toLocaleString('en-US'));
+            (araTotal - DARA >= 0 ? '+' : '') + Math.round(araTotal - DARA).toLocaleString('en-US'));
 
   // \u2500\u2500 Rebalance: Qty After \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   } else if (colKey === 'qtyAfter') {
     const totalQty = d.qtyAfter;
+    const _DARA    = d.DARA ?? summary?.DARA;
     rows = bondVarRows(d, nPeriods, principalPerBond, couponPct) + sep()
       + row('Cost per bond', 'price/100 \xd7 index ratio \xd7 1,000', fm2(d.costPerBond));
     if (d.isBracketTarget) {
@@ -137,7 +139,7 @@ export function buildDrillHTML(d, colKey, summary) {
     } else if (d.qtyAfter !== d.qtyBefore) {
       const piPB = principalPerBond * (1 + d.coupon / 2 * nPeriods);
       const lmi  = d.araAfterLaterMatInt ?? 0;
-      const net  = d.DARA - lmi;
+      const net  = _DARA - lmi;
       rows = row('refCPI', '', fd(d.refCPI, 5))
         + row('Dated date CPI', '', fd(d.baseCpi, 5))
         + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
@@ -147,7 +149,7 @@ export function buildDrillHTML(d, colKey, summary) {
         + sep()
         + row('P+I per bond', 'principal/bond \xd7 (1 + coupon/period \xd7 periods)', fm2(piPB))
         + sep()
-        + row('DARA', '', fm(d.DARA))
+        + row('DARA', '', fm(_DARA))
         + row('Later mat int', 'from bonds maturing after FY', fm(lmi))
         + row('Net needed', 'DARA \u2212 Later mat int', fm(net))
         + sep()
@@ -179,7 +181,7 @@ export function buildDrillHTML(d, colKey, summary) {
   } else if (colKey === 'costBefore' || colKey === 'costAfter') {
     const isBef    = colKey === 'costBefore';
     const isBT     = d.isBracketTarget;
-    const qty      = isBef ? (isBT ? d.fundedYearQty : d.qtyBefore) : d.fundedYearQty;
+    const qty      = isBef ? (isBT ? d.fundedYearQtyBefore : d.qtyBefore) : d.fundedYearQtyAfter;
     const qtyLabel = isBef ? (isBT ? 'FY qty (before)' : 'Qty Before') : 'Qty After';
     const cost     = qty * d.costPerBond;
     rows =

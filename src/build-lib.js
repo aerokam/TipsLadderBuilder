@@ -99,6 +99,16 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     laterMatInt += ann;
   }
 
+  // 3a. Validate: every funded year must have qty >= 1 (DARA too low if laterMatInt < dara but gap < piPerBond/2)
+  for (const year of rangeYears) {
+    const { targetFundedYearQty, laterMatInt, pi } = prelim[year];
+    const yearDara = daraByYear?.get(year) ?? dara;
+    if (targetFundedYearQty === 0 && yearDara > laterMatInt) {
+      const minNeeded = Math.ceil(laterMatInt + pi);
+      throw new Error(`DARA too low for ${year}: need at least $${minNeeded.toLocaleString()} to fund one bond (pi/bond = $${Math.round(pi).toLocaleString()}, later-mat interest = $${Math.round(laterMatInt).toLocaleString()})`);
+    }
+  }
+
   // 3b. Pre-ladder interest pool (Build only, spec: 5.0 §Pre-Ladder Interest Option)
   //     Coupons received from all ladder bonds before the ladder starts (years < firstYear).
   //     Applied short→long to zero out the earliest funded years first.
@@ -210,7 +220,7 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
       refCPI,
       indexRatio: ir,
       halfOrFull,
-      dara,
+      dara: yearDara,
       fundedYearQty: fundedYearQty,
       fundedYearLaterMatInt: prelim[year].laterMatInt,
       preLadderCreditForYear,
