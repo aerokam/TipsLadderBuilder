@@ -214,6 +214,10 @@
           <option value="3bracket" selected>3-bracket (orig + new lower + upper)</option>
         </select>
       </div>
+      <div class="field" id="field-rebal-last-year" style="display:none">
+        <label>Last Year</label>
+        <select id="rebal-last-year"></select>
+      </div>
       <div class="field" id="field-first-year" style="display:none">
         <label for="first-year">First Year</label>
         <select id="first-year"><option value="">—</option></select>
@@ -310,20 +314,29 @@ async function loadData() {
     settlementDate = localDate(settleDateStr);
     tipsMap = buildTipsMapFromYields(yieldsRows);
 
-    // Populate last-year dropdown with available TIPS maturity years
-    const lastYearSel = document.getElementById('last-year');
-    while (lastYearSel.options.length > 1) lastYearSel.remove(1);
+    // Compute TIPS years and gap years within the TIPS timeline
     const bfsYears = [...new Set(
       [...tipsMap.values()]
         .filter(b => b.maturity && b.maturity > settlementDate)
         .map(b => b.maturity.getFullYear())
     )].sort((a, b) => a - b);
-    bfsYears.forEach(y => {
+    const _bfsYearSet = new Set(bfsYears);
+    const _bfsMinY = bfsYears[0], _bfsMaxY = bfsYears[bfsYears.length - 1];
+    const _bfsGapYears = new Set();
+    for (let y = _bfsMinY; y <= _bfsMaxY; y++) {
+      if (!_bfsYearSet.has(y)) _bfsGapYears.add(y);
+    }
+
+    // Populate last-year dropdown (TIPS years + gap years, labeled)
+    const lastYearSel = document.getElementById('last-year');
+    while (lastYearSel.options.length > 1) lastYearSel.remove(1);
+    for (let y = _bfsMinY; y <= _bfsMaxY; y++) {
       const opt = document.createElement('option');
-      opt.value = y; opt.textContent = y;
+      opt.value = y;
+      opt.textContent = _bfsGapYears.has(y) ? `${y} (gap)` : String(y);
       lastYearSel.appendChild(opt);
-    });
-    if (bfsYears.includes(2047)) lastYearSel.value = 2047;
+    }
+    if (_bfsYearSet.has(2047)) lastYearSel.value = 2047;
 
     const firstYearSel = document.getElementById('first-year');
     while (firstYearSel.options.length > 1) firstYearSel.remove(1);
@@ -421,6 +434,8 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.getElementById('field-holdings').style.display  = isRebalance ? '' : 'none';
     document.getElementById('field-method').style.display        = isRebalance ? '' : 'none';
     document.getElementById('field-bracket-mode').style.display   = isRebalance ? '' : 'none';
+    const _rrlySel = document.getElementById('rebal-last-year');
+    document.getElementById('field-rebal-last-year').style.display = isRebalance && _rrlySel.options.length > 0 ? '' : 'none';
     document.getElementById('field-last-year').style.display  = isRebalance ? 'none' : '';
     document.getElementById('field-first-year').style.display = isRebalance ? 'none' : '';
     document.getElementById('field-build-maturity').style.display = isRebalance ? 'none' : '';
@@ -546,14 +561,67 @@ function renderBuildOutput({ results, HDR, summary, details }) {
   window.addEventListener('resize', _setSH);
 }
 
+// ─── Rebalance Last Year dropdown ────────────────────────────────────────────
+function updateRebalLastYearDropdown() {
+  const sel      = document.getElementById('rebal-last-year');
+  const fieldDiv = document.getElementById('field-rebal-last-year');
+  sel.innerHTML  = '';
+
+  if (!currentHoldingsArray || !tipsMap || currentMode !== 'rebalance') {
+    fieldDiv.style.display = 'none'; return;
+  }
+
+  // Mirror runRebalance's lastYear derivation
+  const _hYears = [...new Set(currentHoldingsArray
+    .map(h => { const b = tipsMap.get(h.cusip); return b?.maturity?.getFullYear(); })
+    .filter(y => y != null)
+  )].sort((a, b) => a - b);
+  if (!_hYears.length) { fieldDiv.style.display = 'none'; return; }
+
+  const _firstY = _hYears[0];
+  let _derivedLY = _firstY;
+  for (let i = 0; i < _hYears.length; i++) {
+    const y = _hYears[i];
+    if (y <= 2040) { _derivedLY = y; continue; }
+    if (_hYears[i + 1] === y + 1) { _derivedLY = _hYears[i + 1]; }
+    else { _derivedLY = y; break; }
+  }
+
+  const _tipsYears = new Set([...tipsMap.values()].filter(b => b.maturity).map(b => b.maturity.getFullYear()));
+  const _hYearSet  = new Set(_hYears);
+  const _gapYears  = [];
+  for (let y = _firstY; y <= _derivedLY; y++) {
+    if (!_tipsYears.has(y) && !_hYearSet.has(y)) _gapYears.push(y);
+  }
+  const _gapSet = new Set(_gapYears);
+
+  // Infer default: if gap ends right before derivedLastYear, suggest last gap year
+  const _defaultLY = _gapYears.length > 0 && _gapYears[_gapYears.length - 1] + 1 === _derivedLY
+    ? _gapYears[_gapYears.length - 1] : _derivedLY;
+
+  // Preserve current selection if valid, else use inferred default
+  const _curVal = sel.value ? parseInt(sel.value, 10) : NaN;
+  const _selVal = (!isNaN(_curVal) && _curVal >= _firstY && _curVal <= _derivedLY) ? _curVal : _defaultLY;
+
+  for (let y = _firstY; y <= _derivedLY; y++) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = _gapSet.has(y) ? `${y} (gap)` : String(y);
+    if (y === _selVal) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  fieldDiv.style.display = '';
+}
+
 // ─── Per-year DARA panel ──────────────────────────────────────────────────────
 let _daraByYearPanelDefault = null;
 let _daraByYearStore = new Map();  // year → value; persists across year-range changes
 let _lastKnownDara = null;          // last DARA used (including auto-inferred)
+let _daraAutoInferred = false;      // true when DARA field was populated by inferDARAFromCash
 
 function _daraByYearRow(y, val) {
   return '<tr><td style="text-align:center">' + y + '</td>'
-    + '<td style="text-align:right"><input type="number" value="' + val + '" step="1000" min="0" data-year="' + y + '"'
+    + '<td style="text-align:right"><input type="number" value="' + Math.round(val) + '" step="1000" min="0" data-year="' + y + '"'
     + ' style="width:100px;text-align:right;border:1px solid #ccc;border-radius:3px;padding:2px 4px;font-size:12px;font-variant-numeric:tabular-nums"></td></tr>';
 }
 
@@ -593,11 +661,18 @@ function renderDaraByYearPanel() {
   let years = [];
   if (currentMode === 'rebalance') {
     if (!currentHoldingsArray) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
-    const yearSet = new Set();
+    const _rebalLY = parseInt(document.getElementById('rebal-last-year').value);
+    if (!_rebalLY) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
+    // Derive firstYear from holdings
+    let _rebalFY = Infinity;
     for (const h of currentHoldingsArray) {
-      const bond = tipsMap.get(h.cusip);
-      if (bond?.maturity) yearSet.add(bond.maturity.getFullYear());
+      const b = tipsMap.get(h.cusip);
+      if (b?.maturity) _rebalFY = Math.min(_rebalFY, b.maturity.getFullYear());
     }
+    if (!isFinite(_rebalFY)) { panel.style.display = 'none'; _daraByYearPanelDefault = null; updateDaraInput(); return; }
+    // Show all years from firstYear through selectedLastYear (including gap years)
+    const yearSet = new Set();
+    for (let y = _rebalFY; y <= _rebalLY; y++) yearSet.add(y);
     years = [...yearSet].sort((a, b) => a - b);
   } else {
     const firstYearVal = document.getElementById('first-year').value;
@@ -723,7 +798,7 @@ document.getElementById('dara').addEventListener('keydown', e => {
 document.getElementById('dara-inc').addEventListener('click', () => { _daraStep(1000);  document.getElementById('dara').focus(); });
 document.getElementById('dara-dec').addEventListener('click', () => { _daraStep(-1000); document.getElementById('dara').focus(); });
 
-document.getElementById('dara').addEventListener('input', renderDaraByYearPanel);
+document.getElementById('dara').addEventListener('input', () => { _daraAutoInferred = false; renderDaraByYearPanel(); });
 
 // ─── Run handler ──────────────────────────────────────────────────────────────
 document.getElementById('run-btn').addEventListener('click', async () => {
@@ -766,6 +841,8 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       if (dara !== null && dara < 1000) { setStatus('DARA must be at least $1,000.', true); return; }
       const method       = document.getElementById('method').value;
       const bracketMode  = document.getElementById('bracket-mode').value;
+      const _rebalLYEl   = document.getElementById('rebal-last-year');
+      const lastYearOverride = _rebalLYEl.value ? parseInt(_rebalLYEl.value, 10) : null;
 
       const holdingsRaw = new Map();
       for (const h of currentHoldingsArray) {
@@ -777,16 +854,16 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       let portfolioCash = null;
       if (method === 'Full' && dara === null) {
         setStatus('Inferring DARA from portfolio cash…');
-        ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ bracketMode, holdings, tipsMap, refCPI, settlementDate }));
-        finalDara = Math.round(finalDara / 1000) * 1000;
-        document.getElementById('dara').value = String(finalDara);
-        _daraByYearPanelDefault = finalDara;
-        for (const [yr] of _daraByYearStore) _daraByYearStore.set(yr, finalDara);
+        ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ bracketMode, holdings, tipsMap, refCPI, settlementDate, lastYearOverride }));
+        document.getElementById('dara').value = String(Math.round(finalDara));
+        _daraByYearPanelDefault = Math.round(finalDara);
+        for (const [yr] of _daraByYearStore) _daraByYearStore.set(yr, Math.round(finalDara));
+        _daraAutoInferred = true;
       }
       _lastKnownDara = finalDara;
       setStatus('Running rebalance…');
       const daraByYear = getDaraByYear();
-      const result = runRebalance({ dara: finalDara, method, bracketMode, holdings, tipsMap, refCPI, settlementDate, daraByYear });
+      const result = runRebalance({ dara: finalDara, method, bracketMode, holdings, tipsMap, refCPI, settlementDate, daraByYear, lastYearOverride });
       document.getElementById('dara-by-year').style.display = 'none';
       updateDaraInput();
       renderOutput(result, portfolioCash);
@@ -860,6 +937,7 @@ document.getElementById('holdings-file').addEventListener('change', async (e) =>
       if (acctNames.length === 1) {
         currentHoldingsArray = parsedAccounts[acctNames[0]];
         setStatus(`Loaded 1 account: ${acctNames[0]} (${currentHoldingsArray.length} TIPS).`);
+        updateRebalLastYearDropdown();
         renderDaraByYearPanel();
       } else {
         window._pendingBrokerAccounts = parsedAccounts;
@@ -889,6 +967,7 @@ document.getElementById('holdings-file').addEventListener('change', async (e) =>
       if (arr.length === 0) { setStatus('Holdings CSV has no valid data rows.', true); return; }
       currentHoldingsArray = arr;
       setStatus(`Loaded standard CSV (${arr.length} TIPS).`);
+      updateRebalLastYearDropdown();
       renderDaraByYearPanel();
     }
   } catch (err) {
@@ -906,6 +985,7 @@ document.getElementById('holdings-file').addEventListener('change', async (e) =>
     for (const name of selected) combined = combined.concat(window._pendingBrokerAccounts[name]);
     currentHoldingsArray = combined;
     setStatus(`Loaded ${selected.length} account(s) (${combined.length} TIPS total).`);
+    updateRebalLastYearDropdown();
     renderDaraByYearPanel();
   });
   document.getElementById('account-cancel').addEventListener('click', () => {
@@ -1035,6 +1115,16 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
 // ─── Method toggle: hide DARA for Full rebalance ───────────────────────────────────────
 
 document.getElementById('first-year').addEventListener('change', renderDaraByYearPanel);
+document.getElementById('rebal-last-year').addEventListener('change', () => {
+  if (_daraAutoInferred) {
+    document.getElementById('dara').value = '';
+    _daraAutoInferred = false;
+    _lastKnownDara = null;
+    _daraByYearPanelDefault = null;
+    _daraByYearStore.clear();
+  }
+  renderDaraByYearPanel();
+});
 document.getElementById('last-year').addEventListener('change', renderDaraByYearPanel);
 
 loadData();

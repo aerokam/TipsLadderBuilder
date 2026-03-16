@@ -18,7 +18,10 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
     if (!bond.maturity || !bond.yield) continue;
     const yr = bond.maturity.getFullYear(), mo = bond.maturity.getMonth() + 1;
     if (yr === minGapYear - 1 && mo === 1) anchorBefore = bond;
-    if (yr === maxGapYear + 1 && mo === 2) anchorAfter  = bond;
+    // anchorAfter: nearest Feb bond after the gap (handles lastYear < 2039 where maxGapYear+1 is still a gap year)
+    if (yr > maxGapYear && mo === 2) {
+      if (!anchorAfter || bond.maturity < anchorAfter.maturity) anchorAfter = bond;
+    }
   }
   if (!anchorBefore || !anchorAfter)
     throw new Error('Could not find yield interpolation anchors for gap years');
@@ -74,7 +77,7 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
       yearBondMap[yr] = bond;
   }
 
-  const rangeYears = Object.keys(yearBondMap).map(Number).sort((a, b) => a - b);
+  let rangeYears = Object.keys(yearBondMap).map(Number).sort((a, b) => a - b);
   if (!rangeYears.length) throw new Error('No TIPS bonds found in the specified year range');
 
   // Gap years: years in [firstYear, lastYear] with no available TIPS
@@ -82,6 +85,21 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
   for (let y = firstYear; y <= lastYear; y++) {
     if (!yearBondMap[y]) gapYears.push(y);
   }
+
+  // If gap years exist and lastYear < 2040, add the 2040 bond now (before prelim sweep)
+  // so its coupons count as laterMatInt for earlier years.
+  if (gapYears.length > 0 && !yearBondMap[2040]) {
+    for (const bond of tipsMap.values()) {
+      if (!bond.maturity) continue;
+      if (bond.maturity.getFullYear() !== 2040) continue;
+      if (!yearBondMap[2040] || bond.maturity > yearBondMap[2040].maturity)
+        yearBondMap[2040] = bond;
+    }
+    if (!yearBondMap[2040])
+      throw new Error('No TIPS available in 2040 for upper bracket');
+    rangeYears = [...rangeYears, 2040].sort((a, b) => a - b);
+  }
+
   // 2. Identify brackets (only needed when there are gap years)
   let lowerYear = null, upperYear = null;
 
@@ -145,8 +163,7 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
   if (gapYears.length > 0) {
     const minGapYear = Math.min(...gapYears);
     upperYear = 2040;
-    if (!yearBondMap[upperYear])
-      throw new Error('No TIPS available in 2040 — lastYear must be ≥ 2040');
+    // yearBondMap[2040] is guaranteed present (added before prelim sweep above)
     const yearsBeforeGap = rangeYears.filter(y => y < minGapYear);
     if (!yearsBeforeGap.length) throw new Error('No TIPS bonds available before the gap');
     lowerYear = Math.max(...yearsBeforeGap);

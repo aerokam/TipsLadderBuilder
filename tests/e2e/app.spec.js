@@ -330,6 +330,112 @@ test('build: no NaN in table cells or drill popup', async ({ page }) => {
   await page.locator('#drill-close').click();
 });
 
+// ── 11. Per-year DARA panel ───────────────────────────────────────────────────
+test('build: per-year DARA panel renders when DARA focused with last year selected', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+
+  // Clicking DARA triggers focus handler → renderDaraByYearPanel (DARA already '40000')
+  await page.locator('#dara').click();
+  await expect(page.locator('#dara-by-year')).toBeVisible({ timeout: 3_000 });
+
+  // Must have at least one row with a data-year input
+  const yearInputs = page.locator('#dara-by-year-table input[data-year]');
+  expect(await yearInputs.count()).toBeGreaterThan(0);
+});
+
+test('build: editing a per-year DARA input changes DARA field to "by year"', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+
+  await page.locator('#dara').click();
+  await expect(page.locator('#dara-by-year')).toBeVisible({ timeout: 3_000 });
+
+  // Change first year's target to something different from the default
+  const firstYearInput = page.locator('#dara-by-year-table input[data-year]').first();
+  await firstYearInput.fill('20000');   // fires input event → updateDaraInput()
+
+  await expect(page.locator('#dara')).toHaveValue('by year');
+});
+
+test('rebalance: per-year DARA panel renders after loading holdings and entering DARA', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  // Typing into DARA fires 'input' → renderDaraByYearPanel; holdings already loaded above
+  await page.locator('#dara').fill('10000');
+  await expect(page.locator('#dara-by-year')).toBeVisible({ timeout: 3_000 });
+
+  const yearInputs = page.locator('#dara-by-year-table input[data-year]');
+  expect(await yearInputs.count()).toBeGreaterThan(0);
+});
+
+// ── 12. Enter key triggers Run ────────────────────────────────────────────────
+test('build: pressing Enter (no overlay open) triggers Build Ladder', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+
+  // Blur any focused element so no text field swallows the key
+  await page.locator('h1').click();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#build-output')).toHaveCSS('display', 'block', { timeout: 15_000 });
+});
+
+test('rebalance: pressing Enter (no overlay open) triggers Run Rebalance', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('h1').click();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+});
+
+// ── 13. DARA auto-infer writeback ─────────────────────────────────────────────
+test('rebalance: Full method with blank DARA writes inferred DARA back to input', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  // Ensure DARA is blank (default in rebalance mode) and method is Full (default)
+  await page.locator('#dara').fill('');
+  await expect(page.locator('#method')).toHaveValue('Full');
+
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  // DARA input must now contain a positive integer
+  const daraVal = await page.locator('#dara').inputValue();
+  expect(daraVal, 'DARA field empty after auto-infer').toMatch(/^\d+$/);
+  const daraNum = parseInt(daraVal, 10);
+  expect(daraNum, 'Inferred DARA must be positive').toBeGreaterThan(0);
+});
+
+// ── 14. Export CSV button ──────────────────────────────────────────────────────
+test('rebalance: export button visible after run and triggers CSV download', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  const exportBtn = page.locator('#export-csv-btn');
+  await expect(exportBtn).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    exportBtn.click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/\.csv$/i);
+});
+
+test('build: export button visible after run', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#build-output')).toHaveCSS('display', 'block', { timeout: 15_000 });
+  await expect(page.locator('#export-csv-btn')).toBeVisible();
+});
+
 test('rebalance: no negative Qty After values at low DARA', async ({ page }) => {
   await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
   await page.locator('#dara').fill('5000');
