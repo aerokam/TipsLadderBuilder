@@ -177,7 +177,7 @@ async function main() {
     const ref = refMap.get(p.cusip);
     if (!ref) continue; // no metadata for this CUSIP — skip
 
-    const price = p.sell || p.eod || p.buy || null;
+    const price = p.buy || p.sell || p.eod || null;
     const yld   = price ? yieldFromPrice(price, ref.coupon, settleDateStr, ref.maturity) : null;
 
     rows.push({

@@ -261,6 +261,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
     if (nextInHoldings && nextInHoldings === nextExpected) { lastYear = nextInHoldings; }
     else { lastYear = year; break; }
   }
+  const derivedLastYear = lastYear;  // save before override for sell-above-lastYear logic
   if (lastYearOverride != null) lastYear = lastYearOverride;
 
   const tipsMapYears = new Set();
@@ -472,6 +473,25 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
       }
       postQ = isBracket ? tFundedYearQty + Math.max(0, Math.round(bracketExcessTargetCost[year] / costPerBond)) : tFundedYearQty;
       buySellTargets[year] = { targetCUSIP, targetFundedYearQty: tFundedYearQty, targetQty: postQ, postRebalQty: postQ, qtyDelta: postQ - targetCurrentQty, targetCost: tFundedYearQty * costPerBond, costDelta: -((postQ - targetCurrentQty) * costPerBond), costPerBond, isBracket };
+    } else if (year > lastYear && year <= derivedLastYear && yi.holdings.length > 0) {
+      // Year was contiguous with original ladder but is now above lastYearOverride — sell all
+      tFundedYearQty = 0; postQ = 0;
+      if (targetCUSIP) {
+        const tc = costPerBond;
+        buySellTargets[year] = {
+          targetCUSIP, targetFundedYearQty: 0, targetQty: 0, postRebalQty: 0,
+          qtyDelta: -targetCurrentQty, targetCost: 0,
+          costDelta: targetCurrentQty * tc, costPerBond: tc, isBracket: false,
+        };
+      }
+      for (const h of yi.holdings) {
+        postRebalQtyMap[h.cusip] = 0;
+        if (h.cusip !== targetCUSIP) {
+          const b2 = tipsMap.get(h.cusip);
+          const c2 = (b2?.price ?? 0) / 100 * (refCPI / (b2?.baseCpi ?? refCPI)) * 1000;
+          nonTargetSells[h.cusip] = { newQty: 0, qtyDelta: -h.qty, costDelta: h.qty * c2, targetCost: 0 };
+        }
+      }
     } else {
       tFundedYearQty = targetCurrentQty; postQ = targetCurrentQty;
     }
