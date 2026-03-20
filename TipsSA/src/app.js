@@ -231,16 +231,22 @@ function renderChart(bonds) {
         zoom: {
           pan: {
             enabled: true,
-            mode: 'xy',
+            mode: 'x',
           },
           zoom: {
             wheel: {
               enabled: true,
             },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(26, 86, 219, 0.1)',
+              borderColor: 'rgba(26, 86, 219, 0.4)',
+              borderWidth: 1,
+            },
             pinch: {
               enabled: true
             },
-            mode: 'xy',
+            mode: 'x',
           }
         },
         tooltip: {
@@ -252,6 +258,10 @@ function renderChart(bonds) {
         }
       }
     }
+  });
+
+  document.getElementById('resetZoom').addEventListener('click', () => {
+    chart.resetZoom();
   });
 }
 
