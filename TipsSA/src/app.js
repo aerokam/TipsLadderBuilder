@@ -185,6 +185,8 @@ function renderChart(bonds) {
 
   if (chart) chart.destroy();
 
+  const lockLeftEl = document.getElementById('lockLeft');
+
   chart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -229,9 +231,17 @@ function renderChart(bonds) {
       },
       plugins: {
         zoom: {
+          limits: {
+            x: { min: 'original', max: 'original' }
+          },
           pan: {
             enabled: true,
             mode: 'x',
+            onPan: ({chart}) => {
+              if (lockLeftEl.checked) {
+                chart.options.scales.x.min = labels[0];
+              }
+            }
           },
           zoom: {
             wheel: {
@@ -247,6 +257,11 @@ function renderChart(bonds) {
               enabled: true
             },
             mode: 'x',
+            onZoom: ({chart}) => {
+              if (lockLeftEl.checked) {
+                chart.options.scales.x.min = labels[0];
+              }
+            }
           }
         },
         tooltip: {
@@ -260,8 +275,22 @@ function renderChart(bonds) {
     }
   });
 
+  const resizable = document.getElementById('chartResizable');
+  const slider = document.getElementById('stretchSlider');
+
+  slider.addEventListener('input', (e) => {
+    const val = e.target.value;
+    resizable.style.width = val + '%';
+    chart.resize();
+  });
+
   document.getElementById('resetZoom').addEventListener('click', () => {
+    slider.value = 100;
+    resizable.style.width = '100%';
     chart.resetZoom();
+    chart.options.scales.x.min = undefined;
+    chart.options.scales.x.max = undefined;
+    chart.update();
   });
 }
 

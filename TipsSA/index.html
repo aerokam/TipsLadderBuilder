@@ -42,12 +42,26 @@
   <div id="info-strip"></div>
 
   <div class="card">
-    <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-      <h3 style="margin:0; font-size:14px; color:#1e293b;">Yield Curve (Drag to zoom X-axis)</h3>
-      <button id="resetZoom" style="padding: 4px 10px; font-size: 11px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; cursor:pointer;">Reset Zoom</button>
+    <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+      <h3 style="margin:0; font-size:14px; color:#1e293b;">Yield Curve</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="display:flex; align-items:center; gap:4px;" title="Stretch the curve horizontally to see more detail">
+          <label style="font-size:11px; font-weight:600; color:#64748b; white-space:nowrap;">STRETCH:</label>
+          <input type="range" id="stretchSlider" min="100" max="800" value="100" style="width:80px; cursor:pointer;">
+        </div>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; font-weight:600; color:#64748b;" title="Keep the short end (left side) visible when zooming">
+          <input type="checkbox" id="lockLeft" style="margin:0"> LOCK LEFT
+        </label>
+        <button id="resetZoom" style="padding: 4px 10px; font-size: 11px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; cursor:pointer;">Reset</button>
+      </div>
     </div>
-    <div class="chart-container">
-      <canvas id="yieldChart"></canvas>
+    <div id="chartWrapper" style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff;">
+      <div id="chartResizable" style="width: 100%; height: 400px; min-width: 100%;">
+        <canvas id="yieldChart"></canvas>
+      </div>
+    </div>
+    <div style="font-size:10px; color:#94a3b8; margin-top:6px;">
+      Scroll to zoom · Click-and-drag to pan · Drag selection to zoom range
     </div>
   </div>
 
