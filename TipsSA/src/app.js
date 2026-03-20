@@ -1,7 +1,8 @@
 // TIPS Seasonal Adjustment (TipsSA) Frontend Logic
 
-const YIELDS_CSV_URL = `/TIPS/TipsSA/data/TipsYields.csv`;
-const REF_CPI_CSV_URL = `/TIPS/TipsSA/data/RefCpiNsaSa.csv`;
+const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
+const YIELDS_CSV_URL = `${R2_BASE_URL}/TIPS/TipsYields.csv`;
+const REF_CPI_CSV_URL = `${R2_BASE_URL}/TIPS/RefCpiNsaSa.csv`;
 
 
 // --- Helpers ---
