@@ -151,11 +151,17 @@ async function init() {
   }
 }
 
+function fmtMMM(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
 function renderTable(bonds) {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = bonds.map(b => `
     <tr>
-      <td>${b.maturity}</td>
+      <td>${fmtMMM(b.maturity)}</td>
       <td>${b.cusip}</td>
       <td>${(b.coupon * 100).toFixed(3)}%</td>
       <td>${b.price.toFixed(3)}</td>
@@ -173,7 +179,7 @@ function renderChart(bonds) {
   // Sort bonds by maturity for the chart
   const sorted = [...bonds].sort((a, b) => localDate(a.maturity) - localDate(b.maturity));
   
-  const labels = sorted.map(b => b.maturity);
+  const labels = sorted.map(b => fmtMMM(b.maturity));
   const askYields = sorted.map(b => (b.askYield * 100).toFixed(3));
   const saYields = sorted.map(b => (b.saYield * 100).toFixed(3));
 
@@ -222,6 +228,21 @@ function renderChart(bonds) {
         }
       },
       plugins: {
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'xy',
+          },
+          zoom: {
+            wheel: {
+              enabled: true,
+            },
+            pinch: {
+              enabled: true
+            },
+            mode: 'xy',
+          }
+        },
         tooltip: {
           callbacks: {
             label: function(context) {
