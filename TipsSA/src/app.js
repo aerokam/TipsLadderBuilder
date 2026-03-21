@@ -470,34 +470,33 @@ function renderChart(bonds) {
             color: 'rgba(0, 0, 0, 0.05)'
           },
           ticks: {
-            stepSize: 0.25 
+            stepSize: 0.25,
+            callback: (val) => val.toFixed(2)
           }
         }
       },
       plugins: {
         legend: {
           labels: {
-            usePointStyle: true, // Use circle/X/square icons in the legend
+            usePointStyle: true,
             boxWidth: 8,
             padding: 15,
             font: { size: 12, weight: '500' }
           },
-          onHover: (e) => {
-            e.native.target.style.cursor = 'pointer';
-          },
-          onLeave: (e) => {
-            e.native.target.style.cursor = 'default';
-          }
+          onHover: (e) => { e.native.target.style.cursor = 'pointer'; },
+          onLeave: (e) => { e.native.target.style.cursor = 'default'; }
         },
         zoom: {
           pan: { 
             enabled: true, 
             mode: 'xy',
+            onPanComplete: ({chart}) => updateDynamicTicks(chart)
           },
           zoom: { 
             wheel: { enabled: true }, 
             pinch: { enabled: true }, 
-            mode: 'xy'
+            mode: 'xy',
+            onZoomComplete: ({chart}) => updateDynamicTicks(chart)
           }
         },
         tooltip: {
@@ -515,7 +514,22 @@ function renderChart(bonds) {
 
   document.getElementById('resetZoom').onclick = () => {
     chart.resetZoom();
+    updateDynamicTicks(chart);
   };
+}
+
+// Adaptive Step Size: Force alignment with 0.25 grid
+function updateDynamicTicks(chart) {
+  const yAx = chart.scales.y;
+  const range = yAx.max - yAx.min;
+  let newStep = 0.25;
+
+  if (range > 3) newStep = 0.50;  // Zoomed out
+  if (range > 7) newStep = 1.00;  // Very zoomed out
+  if (range < 0.6) newStep = 0.05; // Zoomed in (0.05 fits into 0.25 perfectly)
+
+  chart.options.scales.y.ticks.stepSize = newStep;
+  chart.update('none');
 }
 
 init();
