@@ -360,6 +360,13 @@ function renderChart(bonds) {
   const maxX = Math.max(...askData.map(d => d.x));
   const xPadding = (maxX - minX) * 0.03;
 
+  // Calculate Y bounds rounded to nearest 0.25
+  const allY = [...askData, ...saData, ...saoData].map(d => d.y);
+  const minYRaw = Math.min(...allY);
+  const maxYRaw = Math.max(...allY);
+  const minY = Math.floor(minYRaw * 4) / 4;
+  const maxY = Math.ceil(maxYRaw * 4) / 4;
+
   if (chart) chart.destroy();
 
   chart = new Chart(ctx, {
@@ -373,7 +380,7 @@ function renderChart(bonds) {
           backgroundColor: '#1a56db',
           borderWidth: 2.2,
           pointRadius: 4,
-          pointStyle: 'rectRot', // Diamond
+          pointStyle: 'circle',
           tension: 0.1,
           order: 1
         },
@@ -383,20 +390,20 @@ function renderChart(bonds) {
           borderColor: '#475569', // Dark Gray
           backgroundColor: '#475569',
           borderWidth: 1.8,
-          pointRadius: 4,
-          pointStyle: 'circle',
-          borderDash: [4, 2], // Subtle dash to distinguish from SAO
+          pointRadius: 5,
+          pointStyle: 'crossRot', // X shape
+          borderDash: [4, 2],
           tension: 0.1,
           order: 2
         },
         {
           label: 'Ask Yield (%)',
           data: askData,
-          borderColor: '#94a3b8', // Medium Gray (more visible than light gray)
+          borderColor: '#94a3b8', // Medium Gray
           backgroundColor: '#94a3b8',
           borderWidth: 1.5,
           pointRadius: 4,
-          pointStyle: 'crossRot', // X shape
+          pointStyle: 'rect', // Square
           tension: 0.1,
           order: 3
         }
@@ -425,8 +432,9 @@ function renderChart(bonds) {
           type: 'linear',
           display: true, 
           title: { display: true, text: 'Yield (%)' },
-          beginAtZero: false,
-          grace: '10%'
+          min: minY,
+          max: maxY,
+          beginAtZero: false
         }
       },
       plugins: {
