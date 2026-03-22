@@ -486,13 +486,12 @@ window.addEventListener('mousemove', e => {
   const width = Math.max(30, startWidth + (e.pageX - startX));
   colWidths[resizerField] = width;
 
-  // Real-time update all cells in this column for smooth feel
-  const cells = document.querySelectorAll(`[data-field="${resizerField}"]`);
+  // Real-time update ONLY table cells in this column for smooth feel
+  const cells = document.querySelectorAll(`th[data-field="${resizerField}"], td[data-field="${resizerField}"]`);
   cells.forEach(c => {
     c.style.width = width + 'px';
     c.style.minWidth = width + 'px';
   });
-  // Also update body cells (not tagged with data-field) - simpler to just re-render on mouseup
 });
 
 window.addEventListener('mouseup', () => {

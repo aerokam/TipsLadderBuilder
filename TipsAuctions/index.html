@@ -57,7 +57,7 @@
   /* ── Table ── */
   .table-wrap { overflow: auto; flex: 1; min-height: 0; }
   table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
-  thead th { background: #1e293b; color: #fff; padding: 6px 10px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 20; cursor: pointer; user-select: none; }
+  thead th { background: #1e293b; color: #fff; padding: 4px 6px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 20; cursor: pointer; user-select: none; font-size: 11px; }
   thead th:hover { background: #2d3f57; }
   thead th.sort-asc::after { content: ' \2191'; }
   thead th.sort-desc::after { content: ' \2193'; }
@@ -65,13 +65,14 @@
   .filter-input { width: 100%; padding: 2px 5px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 3px; outline: none; background: #fff; min-width: 60px; }
   .filter-input:focus { border-color: #1a56db; }
   .filter-input.active { border-color: #f59e0b; background: #fffbeb; }
-  tbody td { padding: 4px 10px; border-bottom: 1px solid #f1f5f9; font-variant-numeric: tabular-nums; }
+  tbody td { padding: 3px 6px; border-bottom: 1px solid #f1f5f9; font-variant-numeric: tabular-nums; font-size: 11px; }
   tbody tr:hover td { background: #fffde7; }
 
   /* ── Sidebar Drag and Drop ── */
-  .col-item { cursor: move; user-select: none; }
+  .col-item { cursor: move; user-select: none; overflow: hidden; }
   .col-item.dragging { opacity: 0.5; background: #f1f5f9; }
   .col-item.drag-over { border-top: 2px solid #1a56db; }
+  .col-item label { cursor: pointer; color: #334155; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ── Column Resizing ── */
   thead th { position: relative; }
