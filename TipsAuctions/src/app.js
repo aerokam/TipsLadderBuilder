@@ -86,10 +86,10 @@ function fieldLabel(f) {
 
 // ── Format detection by field name ────────────────────────────────────────────
 function detectFmt(f) {
+  if (f.includes('cpi')) return 'num3';
   if (f.endsWith('_date') || f.endsWith('_dt')) return 'date';
   if (f.includes('_rate') || f.includes('_yield')) return 'pct3';
   if (f.includes('price')) return 'num4';
-  if (f.includes('cpi')) return 'num3';
   if (f === 'bid_to_cover_ratio') return 'num2';
   if (f.includes('ratio') || f.includes('accrued')) return 'num6';
   if (f.includes('amt') || f.includes('accepted') || f.includes('tendered')) return 'amt';
