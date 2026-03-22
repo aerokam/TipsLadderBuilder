@@ -321,7 +321,7 @@ function renderTable() {
       ${cols.map(f => {
         const val = filters[f] || '';
         const width = colWidths[f] ? `style="width:${colWidths[f]}px;min-width:${colWidths[f]}px;"` : '';
-        return `<td ${width}><input class="filter-input${val ? ' active' : ''}" type="text" data-field="${f}" value="${val}" placeholder="…"></td>`;
+        return `<td ${width}><input class="filter-input${val ? ' active' : ''}" type="text" data-field="${f}" value="${val}" placeholder="…" size="1"></td>`;
       }).join('')}
     </tr>
   `;
