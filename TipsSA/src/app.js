@@ -7,6 +7,16 @@ const YIELDS_CSV_URL = `${R2_BASE_URL}/TIPS/TipsYields.csv`;
 const REF_CPI_CSV_URL = `${R2_BASE_URL}/TIPS/RefCpiNsaSa.csv`;
 const HOLIDAYS_CSV_URL = `${R2_BASE_URL}/misc/BondHolidaysSifma.csv`;
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// --- State ---
+let rawYieldsData = null;
+let rawRefCpiData = null;
+let holidaySet = new Set();
+let brokerPrices = null;
+let chart = null;
+window._currentBonds = [];
+
 // --- Helpers ---
 function parseCsv(text, hasHeader = true) {
   const result = [];
@@ -67,6 +77,12 @@ function nextBusinessDay(date, holidaySet) {
   return d;
 }
 
+function fmtMMM(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
 // ─── Lightweight Popup Logic ──────────────────────────────────────────────────
 function _showDrillPopup(title, html) {
   let ov = document.getElementById('drill-overlay');
@@ -94,7 +110,6 @@ async function _showIntuitionGuide() {
   try {
     const res = await fetch('./knowledge/4.0_SA_Intuition.md');
     const md = await res.text();
-    // Simple MD to HTML conversion for the guide
     const html = md
       .replace(/^# (.*$)/gm, '<h1 style="font-size:1.5em;margin:0 0 16px;color:#1a56db;">$1</h1>')
       .replace(/^## (.*$)/gm, '<h2 style="font-size:1.2em;margin:20px 0 12px;color:#1e293b;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">$1</h2>')
@@ -115,7 +130,6 @@ async function _showIntuitionGuide() {
 }
 
 function _showSaDrill(cusip) {
-  // Find the bond in our current processed list
   const bond = window._currentBonds.find(b => b.cusip === cusip);
   if (!bond) return;
 
@@ -145,11 +159,7 @@ function _showSaDrill(cusip) {
   _showDrillPopup(\`SA Drill-down: \${bond.cusip} (\${fmtMMM(bond.maturity)})\`, html);
 }
 
-let rawYieldsData = null;
-let rawRefCpiData = null;
-let rawHolidayData = null;
-let holidaySet = new Set();
-let brokerPrices = null;
+// ─── Main Logic ──────────────────────────────────────────────────────────────
 
 async function init() {
   const statusEl = document.getElementById('status');
@@ -168,21 +178,18 @@ async function init() {
     rawYieldsData = parseCsv(await yieldsRes.text());
     rawRefCpiData = parseCsv(await refCpiRes.text());
     
-    // Parse holidays: "Wednesday, January 1, 2025", New Year's...
     const holidayRows = parseCsv(await holidayRes.text(), false);
     holidaySet = new Set();
     holidayRows.forEach(row => {
-      const datePart = row[0].split(',').slice(1).join(',').trim(); // " January 1, 2025"
+      const datePart = row[0].split(',').slice(1).join(',').trim(); 
       const d = new Date(datePart);
-      if (!isNaN(d.getTime())) {
-        holidaySet.add(toIsoDate(d));
-      }
+      if (!isNaN(d.getTime())) holidaySet.add(toIsoDate(d));
     });
 
     processAndRender();
 
     window.addEventListener('keydown', (e) => {
-      handleChartKeydown(e, chart, { onAction: ({chart}) => updateDynamicTicks(chart) });
+      if (chart) handleChartKeydown(e, chart, { onAction: ({chart}) => updateDynamicTicks(chart) });
     });
 
   } catch (err) {
@@ -192,24 +199,20 @@ async function init() {
   }
 }
 
-// Backwards-Anchored Trend Fitting for SAO
 function calculateSAO(bonds) {
   const n = bonds.length;
   const sao = new Array(n);
   const now = new Date();
 
-  // Process from longest maturity to shortest
   for (let i = n - 1; i >= 0; i--) {
     const bond = bonds[i];
     const yearsToMat = (bond.maturityDate - now) / 31557600000;
 
-    // 1. Long end (> 7 years): SAO strictly follows SA
     if (yearsToMat > 7 || i > n - 4) {
       sao[i] = bond.saYield;
       continue;
     }
 
-    // 2. Short to Medium end: Fit to the trend established by longer maturities
     const windowSize = 4;
     const actualWindow = Math.min(windowSize, n - 1 - i);
     
@@ -224,16 +227,12 @@ function calculateSAO(bonds) {
     const intercept = (sumY - slope * sumX) / actualWindow;
     const projected = intercept;
 
-    // 3. Blend logic
-    // Refined weights: 2027 maturities (~1yr) should follow SA trend more (lower trendWeight)
     let trendWeight = 0.3;
-    if (yearsToMat < 0.5) trendWeight = 0.9; // Very short end (e.g. Apr 2026) fits trend
-    else if (yearsToMat < 2) trendWeight = 0.5; // Medium-short (e.g. 2027) follows SA more
+    if (yearsToMat < 0.5) trendWeight = 0.9; 
+    else if (yearsToMat < 2) trendWeight = 0.5; 
     else if (yearsToMat < 5) trendWeight = 0.4;
 
-    let candidate = (projected * trendWeight) + (bond.saYield * (1 - trendWeight));
-
-    sao[i] = candidate;
+    sao[i] = (projected * trendWeight) + (bond.saYield * (1 - trendWeight));
   }
   return sao;
 }
@@ -252,30 +251,22 @@ function processAndRender() {
     const uploadTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     sourceLabelEl.textContent = `Using Broker Ask Prices (Uploaded at ${uploadTime})`;
     priceSourceEl.style.display = 'flex';
-    
-    // Get the T+1 date for display
-    const fedSettleDate = localDate(rawYieldsData[0]?.settlementDate);
+    const fedSettleDate = localDate(fedSettleStr);
     const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
     const displaySettle = toIsoDate(tPlus1);
-    
     infoEl.textContent = `Broker Prices · Settlement Date: ${displaySettle} (T+1)`;
   } else {
     priceSourceEl.style.display = 'none';
     infoEl.textContent = `FedInvest market data · Settlement Date: ${fedSettleStr} (T)`;
   }
 
-  // 1. Initial Processing
   const allProcessed = rawYieldsData.map(bond => {
     const coupon = parseFloat(bond.coupon);
     let price = parseFloat(bond.price);
     let settleDateStr = bond.settlementDate;
 
-    // Settlement Date Logic:
-    // FedInvest prices: settlement date = date prices published (T)
-    // Broker CSVs: settlement date is T+1
     if (brokerPrices && brokerPrices.has(bond.cusip)) {
       price = brokerPrices.get(bond.cusip);
-      // For broker prices, we shift settlement to T+1 relative to the FedInvest data date
       const fedSettleDate = localDate(bond.settlementDate);
       const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
       settleDateStr = toIsoDate(tPlus1);
@@ -292,17 +283,15 @@ function processAndRender() {
     const askYield = yieldFromPrice(price, coupon, localDate(settleDateStr), localDate(bond.maturity));
     const saYield = yieldFromPrice(price * (saSettle / saMature), coupon, localDate(settleDateStr), localDate(bond.maturity));
 
-    return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity) };
+    return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity), settlementDate: settleDateStr };
   }).filter(b => b !== null).sort((a, b) => a.maturityDate - b.maturityDate);
 
-  // 2. Generate SAO Yields (Smoothed SA)
   const smoothed = calculateSAO(allProcessed);
   allProcessed.forEach((b, i) => {
     b.saoYield = smoothed[i];
     b.diffBps = (b.saYield - b.askYield) * 10000;
   });
 
-  // 3. Setup Range Filter Dropdowns
   const startSel = document.getElementById('startMaturity');
   const endSel = document.getElementById('endMaturity');
   if (startSel.options.length === 0) {
@@ -329,63 +318,8 @@ function processAndRender() {
   statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS.`;
 }
 
-document.getElementById('brokerFile').addEventListener('change', async (e) => {
-  if (!e.target.files.length) return;
-  try {
-    const text = await e.target.files[0].text();
-    const rows = parseCsv(text);
-    const priceMap = new Map();
-    const seenCusips = new Set();
-    
-    rows.forEach(row => {
-      // 1. Check for standard format (CUSIP in Description)
-      const desc = row["Description"] || "";
-      let cusip = null;
-      let priceStr = null;
-
-      const cusipMatch = desc.match(/[A-Z0-9]{9}/);
-      if (cusipMatch) {
-        cusip = cusipMatch[0];
-        priceStr = row["Price"];
-      } else if (row["Cusip"]) {
-        // 2. Check for Fidelity/Quotes format (Explicit Cusip column)
-        cusip = row["Cusip"];
-        priceStr = row["Price Ask"];
-      }
-
-      if (cusip && !seenCusips.has(cusip)) {
-        const price = parseFloat((priceStr || "").replace(/,/g, ''));
-        if (!isNaN(price)) priceMap.set(cusip, price);
-        seenCusips.add(cusip);
-      }
-    });
-
-    if (priceMap.size === 0) {
-      alert("No valid prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
-      e.target.value = '';
-      return;
-    }
-    brokerPrices = priceMap;
-    processAndRender();
-  } catch (err) {
-    alert("Error parsing CSV: " + err.message);
-  }
-});
-
-document.getElementById('resetFedInvest').onclick = () => {
-  brokerPrices = null;
-  document.getElementById('brokerFile').value = '';
-  processAndRender();
-};
-
-function fmtMMM(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-}
-
 function renderTable(bonds) {
-  window._currentBonds = bonds; // Store for drill-down access
+  window._currentBonds = bonds;
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = bonds.map(b => `
     <tr>
@@ -401,37 +335,19 @@ function renderTable(bonds) {
   `).join('');
 }
 
-// ─── Table and Info Click Handlers ──────────────────────────────────────────
-document.getElementById('tableBody').addEventListener('click', (e) => {
-  const td = e.target.closest('td.drillable');
-  if (!td) return;
-  _showSaDrill(td.dataset.cusip);
-});
-
-document.addEventListener('click', (e) => {
-  if (e.target.id === 'why-adjust-link') {
-    _showIntuitionGuide();
-  }
-});
-
-let chart = null;
 function renderChart(bonds) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
-  
   if (bonds.length === 0) return;
 
-  // Use Numbers for linear scales
   const askData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.askYield * 100).toFixed(3)) }));
   const saData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saYield * 100).toFixed(3)) }));
   const saoData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saoYield * 100).toFixed(3)) }));
 
-  // Explicitly set X bounds aligned to Jan 1st for consistent month labels
   const firstBondDate = new Date(Math.min(...askData.map(d => d.x)));
   const lastBondDate = new Date(Math.max(...askData.map(d => d.x)));
   const minX = new Date(firstBondDate.getFullYear(), 0, 1).getTime();
   const maxX = new Date(lastBondDate.getFullYear() + 1, 0, 1).getTime();
 
-  // Calculate Y bounds rounded to nearest 0.25
   const allY = [...askData, ...saData, ...saoData].map(d => d.y);
   const minYRaw = Math.min(...allY);
   const maxYRaw = Math.max(...allY);
@@ -447,30 +363,30 @@ function renderChart(bonds) {
         {
           label: 'Ask',
           data: askData,
-          borderColor: '#94a3b8', // Medium Gray
+          borderColor: '#94a3b8',
           backgroundColor: '#94a3b8',
           borderWidth: 1.5,
           pointRadius: 3.5, 
-          pointStyle: 'rect', // Square
+          pointStyle: 'rect',
           tension: 0.1
         },
         {
           label: 'Seasonally Adjusted (SA)',
           data: saData,
-          borderColor: '#475569', // Dark Gray
+          borderColor: '#475569',
           backgroundColor: '#475569',
           borderWidth: 1.8,
           pointRadius: 4, 
-          pointStyle: 'crossRot', // X shape
+          pointStyle: 'crossRot',
           tension: 0.1
         },
         {
           label: 'SA with outlier adjustment (SAO)',
           data: saoData,
-          borderColor: '#1a56db', // Bold Blue
+          borderColor: '#1a56db',
           backgroundColor: '#1a56db',
           borderWidth: 2.2,
-          pointRadius: 2.5, // Even smaller
+          pointRadius: 2.5,
           pointStyle: 'circle',
           tension: 0.1
         }
@@ -484,74 +400,30 @@ function renderChart(bonds) {
       scales: {
         x: { 
           type: 'time',
-          display: true, 
-          title: { display: true, text: 'Maturity' },
           min: minX,
           max: maxX,
           time: {
             unit: 'year',
-            displayFormats: {
-              year: 'MMM yyyy',
-              month: 'MMM yyyy'
-            }
+            displayFormats: { year: 'MMM yyyy', month: 'MMM yyyy' }
           },
-          grid: {
-            color: 'rgba(0, 0, 0, 0.05)',
-            minor: {
-              enabled: true,
-              color: 'rgba(0, 0, 0, 0.02)'
-            }
-          },
-          ticks: {
-            autoSkip: true,
-            maxRotation: 0,
-            major: {
-              enabled: true
-            },
-            font: (context) => ({
-              weight: context.tick && context.tick.major ? 'bold' : 'normal'
-            })
-          }
+          grid: { color: 'rgba(0, 0, 0, 0.05)' },
+          ticks: { autoSkip: true, maxRotation: 0 }
         },
         y: { 
           type: 'linear',
-          display: true, 
           title: { display: true, text: 'Yield (%)' },
           min: minY,
           max: maxY,
-          beginAtZero: false,
-          grid: {
-            color: 'rgba(0, 0, 0, 0.05)'
-          },
-          ticks: {
-            stepSize: 0.25,
-            callback: (val) => val.toFixed(2)
-          }
+          ticks: { stepSize: 0.25, callback: (val) => val.toFixed(2) }
         }
       },
       plugins: {
         legend: {
-          labels: {
-            usePointStyle: true,
-            boxWidth: 8,
-            padding: 15,
-            font: { size: 12, weight: '500' }
-          },
-          onHover: (e) => { e.native.target.style.cursor = 'pointer'; },
-          onLeave: (e) => { e.native.target.style.cursor = 'default'; }
+          labels: { usePointStyle: true, boxWidth: 8, padding: 15, font: { size: 12, weight: '500' } }
         },
         zoom: {
-          pan: { 
-            enabled: true, 
-            mode: 'xy',
-            onPanComplete: ({chart}) => updateDynamicTicks(chart)
-          },
-          zoom: { 
-            wheel: { enabled: true }, 
-            pinch: { enabled: true }, 
-            mode: 'xy',
-            onZoomComplete: ({chart}) => updateDynamicTicks(chart)
-          }
+          pan: { enabled: true, mode: 'xy', onPanComplete: ({chart}) => updateDynamicTicks(chart) },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy', onZoomComplete: ({chart}) => updateDynamicTicks(chart) }
         },
         tooltip: {
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -586,13 +458,8 @@ function renderChart(bonds) {
   };
 }
 
-// Adaptive Step Size & Dynamic Y Bounds: 
-// Recalculates Y range based on visible X range to ensure "vertical zoom"
 function updateDynamicTicks(chart) {
   const xAx = chart.scales.x;
-  const yAx = chart.scales.y;
-  
-  // 1. Find visible data range
   let visibleMinY = Infinity;
   let visibleMaxY = -Infinity;
 
@@ -608,23 +475,78 @@ function updateDynamicTicks(chart) {
 
   if (visibleMinY === Infinity) return;
 
-  // 2. Determine Step Size
   const range = visibleMaxY - visibleMinY;
   let newStep = 0.25;
   if (range > 3) newStep = 0.50;  
   if (range > 7) newStep = 1.00;  
   if (range < 0.6) newStep = 0.05; 
 
-  // 3. Snap Bounds to Grid
-  // We add a tiny buffer (0.01) to the snap calculations to avoid data points landing exactly on the line
   const snappedMin = Math.floor((visibleMinY - 0.01) / newStep) * newStep;
   const snappedMax = Math.ceil((visibleMaxY + 0.01) / newStep) * newStep;
 
   chart.options.scales.y.min = snappedMin;
   chart.options.scales.y.max = snappedMax;
   chart.options.scales.y.ticks.stepSize = newStep;
-  
   chart.update('none');
 }
+
+// ─── Interaction Handlers ────────────────────────────────────────────────────
+
+document.getElementById('brokerFile').addEventListener('change', async (e) => {
+  if (!e.target.files.length) return;
+  try {
+    const text = await e.target.files[0].text();
+    const rows = parseCsv(text);
+    const priceMap = new Map();
+    const seenCusips = new Set();
+    
+    rows.forEach(row => {
+      const desc = row["Description"] || "";
+      let cusip = null;
+      let priceStr = null;
+      const cusipMatch = desc.match(/[A-Z0-9]{9}/);
+      if (cusipMatch) {
+        cusip = cusipMatch[0];
+        priceStr = row["Price"];
+      } else if (row["Cusip"]) {
+        cusip = row["Cusip"];
+        priceStr = row["Price Ask"];
+      }
+      if (cusip && !seenCusips.has(cusip)) {
+        const price = parseFloat((priceStr || "").replace(/,/g, ''));
+        if (!isNaN(price)) priceMap.set(cusip, price);
+        seenCusips.add(cusip);
+      }
+    });
+
+    if (priceMap.size === 0) {
+      alert("No valid prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
+      e.target.value = '';
+      return;
+    }
+    brokerPrices = priceMap;
+    processAndRender();
+  } catch (err) {
+    alert("Error parsing CSV: " + err.message);
+  }
+});
+
+document.getElementById('resetFedInvest').onclick = () => {
+  brokerPrices = null;
+  document.getElementById('brokerFile').value = '';
+  processAndRender();
+};
+
+document.getElementById('tableBody').addEventListener('click', (e) => {
+  const td = e.target.closest('td.drillable');
+  if (!td) return;
+  _showSaDrill(td.dataset.cusip);
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'why-adjust-link') {
+    _showIntuitionGuide();
+  }
+});
 
 init();
