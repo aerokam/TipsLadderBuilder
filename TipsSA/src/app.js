@@ -169,10 +169,16 @@ function processAndRender() {
     const uploadTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     sourceLabelEl.textContent = `Using Broker Ask Prices (Uploaded at ${uploadTime})`;
     priceSourceEl.style.display = 'flex';
-    infoEl.textContent = `Broker Prices (T+1 Settlement)`;
+    
+    // Get the T+1 date for display
+    const fedSettleDate = localDate(rawYieldsData[0]?.settlementDate);
+    const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
+    const displaySettle = toIsoDate(tPlus1);
+    
+    infoEl.textContent = `Broker Prices · Settlement Date: ${displaySettle} (T+1)`;
   } else {
     priceSourceEl.style.display = 'none';
-    infoEl.textContent = `FedInvest market data as of ${fedSettleStr}`;
+    infoEl.textContent = `FedInvest market data · Settlement Date: ${fedSettleStr} (T)`;
   }
 
   // 1. Initial Processing

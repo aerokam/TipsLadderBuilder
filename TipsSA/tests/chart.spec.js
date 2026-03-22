@@ -26,6 +26,14 @@ test.describe('TipsSA Chart and UI', () => {
       });
     });
 
+    await page.route('**/misc/BondHolidaysSifma.csv', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/csv',
+        body: '"Wednesday, January 1, 2025",New Year’s Day\n'
+      });
+    });
+
     await page.goto('./');
     // Wait for the table to load (indicates data processing finished)
     await expect(page.locator('#saTable tbody tr')).toHaveCount(3, { timeout: 10000 });
@@ -38,7 +46,7 @@ test.describe('TipsSA Chart and UI', () => {
 
   test('should show correct yield curve labels', async ({ page }) => {
     const infoStrip = page.locator('#info-strip');
-    await expect(infoStrip).toContainText('FedInvest market data as of 2026-03-19');
+    await expect(infoStrip).toContainText('FedInvest market data · Settlement Date: 2026-03-19 (T)');
   });
 
   test('should allow maturity range filtering', async ({ page }) => {
