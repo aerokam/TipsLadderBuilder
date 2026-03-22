@@ -1,4 +1,9 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 // We'll just import the functions and run them.
 // But they are currently standalone scripts with top-level await/calls.
 // I'll refactor them to export functions if needed, or just use child_process.

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treasury Auctions - TIPS Portal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; font-size: 13px; margin: 0; padding: 0; color: #222; background: #f1f5f9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header { padding: 9px 14px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  header h1 { font-size: 17px; margin: 0; }
+  .back-link { font-size: 12px; color: #1a56db; text-decoration: none; }
+  .back-link:hover { text-decoration: underline; }
+  #status { font-size: 11px; color: #64748b; font-style: italic; }
+  #status.error { color: #dc2626; font-style: normal; font-weight: 600; }
+  .btn { padding: 4px 10px; font-size: 11px; background: #1e293b; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }
+  .btn:hover { background: #334155; }
+  .btn-sm { padding: 3px 8px; font-size: 10px; }
+
+  /* ── Layout ── */
+  .layout { flex: 1; display: flex; min-height: 0; padding: 10px; gap: 10px; }
+
+  /* ── Sidebar ── */
+  .sidebar { width: 220px; flex-shrink: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .sidebar-section { padding: 10px; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
+  .sidebar-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 6px; }
+  .view-btn { display: block; width: 100%; text-align: left; padding: 5px 8px; margin-bottom: 3px; font-size: 12px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 4px; background: #fff; color: #475569; cursor: pointer; }
+  .view-btn:last-child { margin-bottom: 0; }
+  .view-btn.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+  .view-btn:hover:not(.active) { background: #f8fafc; }
+
+  .col-search { width: 100%; padding: 4px 7px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px; outline: none; }
+  .col-search:focus { border-color: #1a56db; }
+
+  .col-list { flex: 1; overflow-y: auto; padding: 4px 10px; }
+  .col-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; cursor: pointer; }
+  .col-item input { margin: 0; cursor: pointer; }
+  .col-item label { cursor: pointer; color: #334155; user-select: none; }
+  .col-item.hidden { display: none; }
+
+  .sidebar-actions { padding: 8px 10px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+
+  /* ── Content area ── */
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+
+  /* ── Sections ── */
+  .section { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; min-height: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .section-header { padding: 7px 12px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 10px; background: #f8fafc; border-radius: 8px 8px 0 0; flex-shrink: 0; }
+  .section-title { font-size: 11px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 0.05em; }
+  #row-count { font-size: 11px; color: #94a3b8; margin-left: auto; }
+
+  .upcoming-section { flex-shrink: 0; max-height: 190px; }
+  .historical-section { flex: 1; }
+
+  /* ── Table ── */
+  .table-wrap { overflow: auto; flex: 1; min-height: 0; }
+  table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+  thead th { background: #1e293b; color: #fff; padding: 6px 10px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 20; cursor: pointer; user-select: none; }
+  thead th:hover { background: #2d3f57; }
+  thead th.sort-asc::after { content: ' \2191'; }
+  thead th.sort-desc::after { content: ' \2193'; }
+  .filter-row td { padding: 2px 4px; position: sticky; background: #f1f5f9; border-bottom: 2px solid #cbd5e1; z-index: 19; }
+  .filter-input { width: 100%; padding: 2px 5px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 3px; outline: none; background: #fff; min-width: 60px; }
+  .filter-input:focus { border-color: #1a56db; }
+  .filter-input.active { border-color: #f59e0b; background: #fffbeb; }
+  tbody td { padding: 4px 10px; border-bottom: 1px solid #f1f5f9; font-variant-numeric: tabular-nums; }
+  tbody tr:hover td { background: #fffde7; }
+
+  /* ── Scrollbars ── */
+  .col-list::-webkit-scrollbar, .table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  .col-list::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-track { background: #f8fafc; }
+  .col-list::-webkit-scrollbar-thumb, .table-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+  footer { font-size: 11px; color: #94a3b8; padding: 5px; text-align: center; flex-shrink: 0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Treasury Auctions</h1>
+    <a href="../" class="back-link">← Portal</a>
+    <button id="refreshBtn" class="btn" style="margin-left:auto;">Refresh</button>
+    <div id="status">Loading...</div>
+  </header>
+
+  <div class="layout">
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">View</div>
+        <button class="view-btn active" data-view="all">All</button>
+        <button class="view-btn" data-view="bills">Bills</button>
+        <button class="view-btn" data-view="notesbonds">Notes &amp; Bonds</button>
+        <button class="view-btn" data-view="tips">TIPS</button>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Columns</div>
+        <input type="text" class="col-search" id="colSearch" placeholder="Search columns...">
+      </div>
+      <div class="col-list" id="colList"></div>
+      <div class="sidebar-actions">
+        <button class="btn btn-sm" id="resetColsBtn" style="background:#475569;">Reset Defaults</button>
+        <button class="btn btn-sm" id="clearFiltersBtn" style="background:#475569;">Clear Filters</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section upcoming-section">
+        <div class="section-header">
+          <span class="section-title">Upcoming Auctions</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr id="upcoming-thead"></tr></thead>
+            <tbody id="upcoming-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section historical-section">
+        <div class="section-header">
+          <span class="section-title">Historical Auctions</span>
+          <div id="date-range" style="display:flex;align-items:center;gap:6px;margin-left:12px;">
+            <label style="font-size:11px;color:#64748b;font-weight:600;">From</label>
+            <input type="date" id="dateFrom" style="font-size:11px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:4px;">
+            <label style="font-size:11px;color:#64748b;font-weight:600;">To</label>
+            <input type="date" id="dateTo" style="font-size:11px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:4px;">
+            <button id="clearDateBtn" style="font-size:11px;padding:1px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;color:#475569;">✕</button>
+          </div>
+          <span id="row-count" style="margin-left:auto;"></span>
+        </div>
+        <div class="table-wrap" id="tableWrap">
+          <table id="mainTable">
+            <thead id="mainThead"></thead>
+            <tbody id="mainTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Data from <a href="https://fiscaldata.treasury.gov" style="color:#94a3b8;">U.S. Treasury FiscalData</a> ·
+    A free contribution to the <a href="https://www.bogleheads.org/" style="color:#94a3b8; text-decoration:none; border-bottom:1px dotted #cbd5e1;">Bogleheads</a> community
+  </footer>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

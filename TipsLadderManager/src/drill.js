@@ -116,20 +116,24 @@ export function buildDrillHTML(d, colKey, summary) {
   // \u2500\u2500 Rebalance: Amount Before / After \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   } else if (colKey === 'amtBefore' || colKey === 'amtAfter') {
     const isBef       = colKey === 'amtBefore';
-    const principal   = isBef ? d.araBeforePrincipal   : d.araAfterPrincipal;
-    const ownCoupon   = isBef ? d.araBeforeOwnCoupon   : d.araAfterOwnCoupon;
+    const holdings    = (isBef ? d.araBeforeHoldings : d.araAfterHoldings) ?? [];
     const laterMatInt = isBef ? d.araBeforeLaterMatInt : d.araAfterLaterMatInt;
     const araTotal    = isBef ? d.araBeforeTotal       : d.araAfterTotal;
-    const couponLbl   = nPeriods === 1 ? 'Last coupon (1 period)' : 'Last 2 coupons (2 periods)';
-    const araQty      = isBef ? d.fundedYearQtyBefore : d.fundedYearQtyAfter;
     const DARA        = d.DARA ?? summary?.DARA;
-    rows = row('Qty', '', araQty + ' bonds', false, undefined, 'qty') + sep()
-      + bondVarRows(d, nPeriods, principalPerBond, couponPct) + sep()
-      + row('Principal', '<span class="formula-var" data-source="ppb">principal/bond</span> \xd7 <span class="formula-var" data-source="qty">qty</span>', fm(principal))
-      + row(couponLbl, '<span class="formula-var" data-source="ppb">principal/bond</span> \xd7 <span class="formula-var" data-source="cpp">coupon/period</span> \xd7 <span class="formula-var" data-source="cp">periods</span> \xd7 <span class="formula-var" data-source="qty">qty</span>', fm(ownCoupon))
+    let ownSum = 0;
+    holdings.forEach((h, i) => {
+      const piPB = h.principalPerBond * (1 + h.coupon / 2 * h.nPeriods);
+      const hTotal = piPB * h.qty;
+      ownSum += hTotal;
+      const mo = MONTHS[h.maturityMonth];
+      const yr = String(h.maturityYear).slice(2);
+      rows += row(mo + ' \u2019' + yr + ' \xd7 ' + h.qty, '<span class="drill-l3" data-l3="pipb-' + i + '" style="cursor:pointer;text-decoration:underline dotted #94a3b8;">' + fm2(piPB) + '/bond</span>', fm(hTotal));
+    });
+    rows += sep()
+      + row('Funded year bonds subtotal', '', fm(ownSum))
       + row('Later maturity interest', 'from bonds maturing after FY', fm(laterMatInt), false, undefined, 'lmi')
       + sep()
-      + row(isBef ? 'Amount Before' : 'Amount After', 'Principal + Coupons + <span class="formula-var" data-source="lmi">Later mat int</span>', fm(araTotal), true)
+      + row(isBef ? 'Amount Before' : 'Amount After', 'Funded year bonds + <span class="formula-var" data-source="lmi">Later mat int</span>', fm(araTotal), true)
       + sep()
       + row('DARA', '', fm(DARA), false, undefined, 'dara')
       + row('Surplus / Deficit', (isBef ? 'Amount Before' : 'Amount After') + ' \u2212 <span class="formula-var" data-source="dara">DARA</span>',
@@ -281,6 +285,23 @@ export function buildDrillHTML(d, colKey, summary) {
   return '<table style="border-collapse:collapse;width:auto;font-size:12px">' + rows + '</table>';
 }
 
+export function buildPIPerBondDrill(h) {
+  const ir = h.principalPerBond / 1000;
+  const couponInterest = h.principalPerBond * h.coupon / 2 * h.nPeriods;
+  const piPB = h.principalPerBond + couponInterest;
+  const matMo = MONTHS[h.maturityMonth];
+  const prevMo = MONTHS[(h.maturityMonth - 6 + 12) % 12];
+  const periodLabel = h.nPeriods === 1 ? matMo + ' coupon' : prevMo + ' + ' + matMo + ' coupons';
+  const couponNote = '$' + fd(h.principalPerBond, 2) + ' \u00d7 ' + fd(h.coupon / 2 * 100, 5) + '% \u00d7 ' + h.nPeriods + ' (' + periodLabel + ')';
+  return [
+    { label: 'Index ratio', note: 'Ref CPI \u00f7 Dated Ref CPI', value: fd(ir, 5) },
+    { label: 'Principal', note: '1,000 \u00d7 index ratio', value: '$' + fd(h.principalPerBond, 2) },
+    { label: 'Coupon interest', note: couponNote, value: '$' + fd(couponInterest, 2) },
+    { sep: true },
+    { label: 'P+I per bond', value: '$' + fd(piPB, 2), total: true }
+  ];
+}
+
 export function buildIndexRatioDrill(d) {
   return [
     { label: 'Settlement Ref CPI', value: fd(d.refCPI, 5) },
@@ -292,12 +313,18 @@ export function buildIndexRatioDrill(d) {
   ];
 }
 
-export function buildRefCpiDrill(d, complexity = 'quant') {
+export function buildRefCpiDrill(d, complexity = 'quant', refCpiRows = null) {
   const date = new Date(d.settlementDate || d.settlementDateStr || new Date());
   const day = date.getDate();
   const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
   const m3 = MONTHS[(date.getMonth() - 3 + 12) % 12];
   const m2 = MONTHS[(date.getMonth() - 2 + 12) % 12];
+  const _pad = n => String(n).padStart(2, '0');
+  const _m3Key = date.getFullYear() + '-' + _pad(date.getMonth() + 1) + '-01';
+  const _m2Next = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  const _m2Key = _m2Next.getFullYear() + '-' + _pad(_m2Next.getMonth() + 1) + '-01';
+  const cpiM3Val = refCpiRows ? (refCpiRows.find(r => r.date === _m3Key)?.refCpi ?? null) : null;
+  const cpiM2Val = refCpiRows ? (refCpiRows.find(r => r.date === _m2Key)?.refCpi ?? null) : null;
 
   const isQuant = complexity === 'quant';
 
@@ -328,8 +355,8 @@ export function buildRefCpiDrill(d, complexity = 'quant') {
       { heading: 'Interpolation Formula' },
       { label: 'Ref CPI', value: 'CPI(m-3) + (d-1)/D \u00d7 [CPI(m-2) - CPI(m-3)]', note: 'Per 31 CFR \u00a7 356 Appx B' },
       { sep: true },
-      { label: 'm-3 CPI-U (NSA)', note: 'CPI-U for ' + m3, value: 'Lookup...' },
-      { label: 'm-2 CPI-U (NSA)', note: 'CPI-U for ' + m2, value: 'Lookup...' },
+      { label: 'm-3 CPI-U (NSA)', note: 'CPI-U for ' + m3, value: cpiM3Val != null ? fd(cpiM3Val, 3) : 'see BLS' },
+      { label: 'm-2 CPI-U (NSA)', note: 'CPI-U for ' + m2, value: cpiM2Val != null ? fd(cpiM2Val, 3) : 'see BLS' },
       { sep: true },
       { label: 'Ref CPI', note: 'Interpolated daily value', value: fd(d.refCPI, 5), total: true }
     );

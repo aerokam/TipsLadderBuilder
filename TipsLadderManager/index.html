@@ -290,7 +290,7 @@
 import { buildTipsMapFromYields, localDate, runRebalance, inferDARAFromCash, yieldFromPrice } from './src/rebalance-lib.js';
 import { runBuild } from './src/build-lib.js';
 import { renderTable } from './src/render.js';
-import { buildDrillHTML, buildDurationPopupRows, buildIndexRatioDrill, buildRefCpiDrill } from './src/drill.js';
+import { buildDrillHTML, buildDurationPopupRows, buildIndexRatioDrill, buildRefCpiDrill, buildPIPerBondDrill } from './src/drill.js';
 import { showPopup, hidePopup } from './src/popup.js';
 import { fetchTipsData, lookupRefCpi } from './src/data.js';
 window.lookupRefCpi = lookupRefCpi;
@@ -1016,7 +1016,7 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 });
 
 // ─── Drill-down event wiring ────────────────────────────────────────────────────────────
-let currentDrillData = null;
+let currentDrillData = null, currentDrillColKey = null;
 
 document.getElementById('build-table').addEventListener('click', e => {
   const td = e.target.closest('td.drillable');
@@ -1025,7 +1025,7 @@ document.getElementById('build-table').addEventListener('click', e => {
   const key = td.dataset.col;
   const d   = buildDetails[ri];
   if (!d) return;
-  currentDrillData = d;
+  currentDrillData = d; currentDrillColKey = key;
   const colNames = { amount: 'Amount', cost: 'Cost', gapAmount: 'Gap Amount', gapCost: 'Gap Cost' };
   const suffix   = (key === 'gapAmount' || key === 'gapCost') ? ' (bracket)' : '';
   document.getElementById('drill-title').textContent =
@@ -1044,7 +1044,7 @@ document.getElementById('simple-table').addEventListener('click', e => {
   const key = td.dataset.col;
   const d   = rebalDetails[ri];
   if (!d) return;
-  currentDrillData = d;
+  currentDrillData = d; currentDrillColKey = key;
   const colNames = { amtBefore: 'Amount Before', amtAfter: 'Amount After',
     excessBefore: 'Excess Before', excessAfter: 'Excess After',
     qtyBefore: 'Qty Before', qtyAfter: 'Qty After', cashDelta: 'Cash Δ',
@@ -1069,11 +1069,19 @@ document.getElementById('drill-content').addEventListener('click', e => {
   let title = '';
   let bc = 'Ladder \u203a FY ' + currentDrillData.fundedYear + ' \u203a ' + currentDrillData.cusip;
   if (key === 'refCPI') {
-    const builder = (comp) => buildRefCpiDrill(currentDrillData, comp);
+    const builder = (comp) => buildRefCpiDrill(currentDrillData, comp, refCpiRows);
     showPopup(target, 'Ref CPI Interpolation', builder, bc + ' \u203a Ref CPI', 'quant');
   } else if (key === 'indexRatio') {
     const rows = buildIndexRatioDrill(currentDrillData);
     showPopup(target, 'Index Ratio Calculation', rows, bc + ' \u203a Index Ratio');
+  } else if (key.startsWith('pipb-')) {
+    const idx = parseInt(key.slice(5), 10);
+    const hArr = currentDrillColKey === 'amtBefore' ? currentDrillData.araBeforeHoldings : currentDrillData.araAfterHoldings;
+    const h = hArr?.[idx];
+    if (!h) return;
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][h.maturityMonth];
+    const rows = buildPIPerBondDrill(h);
+    showPopup(target, 'P+I per bond \u00b7 ' + mo + ' \u2019' + String(h.maturityYear).slice(2), rows, bc + ' \u203a P+I/bond');
   }
 });
 

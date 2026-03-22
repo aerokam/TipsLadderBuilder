@@ -43,6 +43,8 @@ const TIME_RANGE_MAP = {
 const TIME_RANGES = Object.keys(TIME_RANGE_MAP);
 
 const charts = {}; // symbol -> chartInstance
+const historyCache = {}; // symbol -> points (baseline from R2)
+const liveCache = {}; // symbol -> points (2D real-time tip)
 let activeSymbols = new Set(['US10YTIPS', 'US30YTIPS', 'US10Y', 'US30Y']);
 let activeRange = '2D';
 
@@ -228,15 +230,16 @@ function createChartInstance(sym) {
         },
         tooltip: {
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          titleColor: '#1e293b',
-          bodyColor: '#475569',
+          titleColor: '#94a3b8',
+          titleFont: { size: 11 },
+          bodyColor: '#1e293b',
           borderColor: '#e2e8f0',
           borderWidth: 1,
           padding: 8,
-          bodyFont: { size: 10 },
+          bodyFont: { size: 12 },
           cornerRadius: 6,
           displayColors: false,
-          callbacks: { label: ctx => `${sym}: ${ctx.parsed.y.toFixed(3)}%` }
+          callbacks: { label: ctx => `Yield: ${ctx.parsed.y.toFixed(3)}%` }
         }
       }
     }
@@ -264,6 +267,8 @@ function buildUrl(symbol, timeRange) {
   return base + "?" + Object.entries(params).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
 }
 
+const R2_HISTORY_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS/yield-history';
+
 function parseSourceTime(tt) {
   if (!tt || tt.length !== 14) return null;
   const year = parseInt(tt.substring(0, 4), 10);
@@ -275,8 +280,46 @@ function parseSourceTime(tt) {
   return new Date(year, month, day, hour, minute, second);
 }
 
-// Fallback logic for shared link (CORS bypass via local data)
 async function fetchOne(symbol, range) {
+  const isIntraday = range === '2D' || range === '10D';
+  
+  if (isIntraday) {
+    console.log(`%c[CNBC] %cFetching real-time ${range} for ${symbol}`, "color: #2563eb; font-weight: bold", "color: inherit");
+    const live = await fetchLive(symbol, range);
+    if (range === '2D') liveCache[symbol] = live; // Update tip cache
+    return live;
+  } else {
+    // Baseline from R2 + Live Tip from CNBC
+    console.log(`%c[R2] %cLoading history for ${symbol}...`, "color: #ea580c; font-weight: bold", "color: inherit");
+    const history = await fetchHistory(symbol);
+    
+    // Reuse live tip if available, else fetch once
+    let liveTip = liveCache[symbol];
+    if (!liveTip) {
+      console.log(`%c[CNBC] %cFetching 2D tip for ${symbol}...`, "color: #2563eb; font-weight: bold", "color: inherit");
+      liveTip = await fetchLive(symbol, '2D');
+      liveCache[symbol] = liveTip;
+    }
+
+    if (!history) return liveTip;
+    if (!liveTip) return history;
+
+    const lastHistTime = history[history.length - 1].x.getTime();
+    const newPoints = liveTip.filter(p => p.x.getTime() > lastHistTime);
+    const combined = [...history, ...newPoints];
+
+    if (range === 'ALL') return combined;
+    const cutoff = new Date();
+    if (range === '1Y') cutoff.setFullYear(cutoff.getFullYear() - 1);
+    else if (range === '2Y') cutoff.setFullYear(cutoff.getFullYear() - 2);
+    else if (range === '3Y') cutoff.setFullYear(cutoff.getFullYear() - 3);
+    else if (range === '10Y') cutoff.setFullYear(cutoff.getFullYear() - 10);
+    
+    return combined.filter(p => p.x >= cutoff);
+  }
+}
+
+async function fetchLive(symbol, range) {
   const url = buildUrl(symbol, range);
   try {
     const response = await fetch(url);
@@ -289,20 +332,33 @@ async function fetchOne(symbol, range) {
       return { x: parseSourceTime(bar.tradeTime), y: parseFloat(closeVal) };
     }).filter(p => p.x && !isNaN(p.y));
   } catch (err) {
-    console.warn(`Direct fetch failed for ${symbol} (possibly CORS). Checking local data...`);
-    // Attempt to load from local static data folder (for shared link)
-    try {
-      const localPath = `./data/${symbol}_${range}.json`;
-      const localResp = await fetch(localPath);
-      if (localResp.ok) {
-        const localJson = await localResp.json();
-        return localJson.map(p => ({ x: new Date(p.x), y: p.y }));
-      }
-    } catch (localErr) {
-      console.error(`Local fallback failed:`, localErr);
-    }
+    console.warn(`Live fetch failed for ${symbol}:`, err);
     return null;
   }
+}
+
+async function fetchHistory(symbol) {
+  if (!historyCache[symbol]) {
+    historyCache[symbol] = (async () => {
+      const fileName = `${symbol}_history.json`;
+      const r2Url = `${R2_HISTORY_URL}/${fileName}`;
+      const localUrl = `./data/yield-history/${fileName}`;
+
+      try {
+        let response = await fetch(r2Url);
+        if (!response.ok) response = await fetch(localUrl);
+        if (!response.ok) throw new Error("History not found");
+        
+        const data = await response.json();
+        return data.map(p => ({ x: parseSourceTime(p.x), y: p.y }));
+      } catch (err) {
+        console.error(`History load failed for ${symbol}:`, err);
+        delete historyCache[symbol];
+        return null;
+      }
+    })();
+  }
+  return await historyCache[symbol];
 }
 
 function updateDynamicTicks(chart, data) {

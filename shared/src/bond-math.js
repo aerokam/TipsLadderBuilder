@@ -121,6 +121,62 @@ export function yieldFromPrice(cleanPrice, coupon, settle, mature) {
   return y;
 }
 
+// ─── Price from yield (Actual/Actual) ─────────────────────────────────────────
+// Spec: PV of cash flows for a bond.
+// yld: annual yield (decimal, e.g. 0.02)
+// coupon: annual rate (decimal)
+// settle: Date object
+// mature: Date object
+export function priceFromYield(yld, coupon, settle, mature) {
+  if (yld === null || yld === undefined) return null;
+  if (settle >= mature) return null;
+
+  const semiCoupon = (coupon / 2) * 100;
+  const matMon = mature.getMonth() + 1;
+  const cm1 = matMon <= 6 ? matMon : matMon - 6;
+  const cm2 = cm1 + 6;
+
+  function nextCouponOnOrAfter(d) {
+    const candidates = [];
+    for (let y = d.getFullYear() - 1; y <= d.getFullYear() + 1; y++) {
+      candidates.push(new Date(y, cm1 - 1, 15));
+      candidates.push(new Date(y, cm2 - 1, 15));
+    }
+    candidates.sort((a, b) => a - b);
+    return candidates.find(c => c >= d && c <= mature) || null;
+  }
+
+  const nextCoupon = nextCouponOnOrAfter(settle);
+  if (!nextCoupon) return null;
+  const lastCoupon = new Date(nextCoupon.getTime());
+  lastCoupon.setMonth(lastCoupon.getMonth() - 6);
+
+  const days = (a, b) => (b.getTime() - a.getTime()) / 86400000;
+  const E = days(lastCoupon, nextCoupon);
+  const A = days(lastCoupon, settle);
+  const DSC = days(settle, nextCoupon);
+  const accrued = semiCoupon * (A / E);
+  const w = DSC / E;
+
+  const coupons = [];
+  let d = new Date(nextCoupon);
+  while (d <= mature) {
+    coupons.push(new Date(d));
+    d = new Date(d.getTime());
+    d.setMonth(d.getMonth() + 6);
+  }
+  const N = coupons.length;
+
+  const r = yld / 2;
+  let pv = 0;
+  for (let k = 0; k < N; k++) {
+    const cf = k === N - 1 ? semiCoupon + 100 : semiCoupon;
+    pv += cf / Math.pow(1 + r, w + k);
+  }
+
+  return pv - accrued; // Return clean price
+}
+
 // ─── Rung amount ──────────────────────────────────────────────────────────────
 // Spec: 5.0 §rungAmount, 4.0 Phase 5 ARA After formula
 export function rungAmount(qty, piPerBond, laterMatInt) {

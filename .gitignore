@@ -13,3 +13,6 @@ lerna-debug.log*
 /TipsLadderBuilder/node_modules/
 /TipsSA/node_modules/
 /TipsSA/data/*.csv
+
+YieldsMonitor/data/yield-history/
+

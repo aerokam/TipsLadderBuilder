@@ -1,5 +1,10 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 export async function uploadToR2(key, body, contentType = 'text/csv') {
   const {

@@ -1,0 +1,36 @@
+name: Get Treasury Auctions
+
+on:
+  schedule:
+    - cron: '5 15 * * 1-5'   # 11:05 AM EDT (UTC-4) / 12:05 PM EST (UTC-5)
+    - cron: '35 17 * * 1-5'  # 1:35 PM EDT (UTC-4) / 2:35 PM EST (UTC-5)
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: TipsLadderManager
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Get Treasury Auctions
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: node scripts/getAuctions.js

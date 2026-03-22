@@ -1,0 +1,403 @@
+// Treasury Auctions - app.js
+
+const R2_CSV_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS/Auctions.csv';
+
+const UPCOMING_BASE_URL =
+  'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/upcoming_auctions' +
+  '?format=csv&fields=cusip,announcemt_date,auction_date,issue_date,security_term,security_type,reopening' +
+  '&sort=announcemt_date,auction_date';
+
+function upcomingUrl() {
+  const today = new Date().toISOString().substring(0, 10);
+  return `${UPCOMING_BASE_URL}&filter=auction_date:gte:${today}`;
+}
+
+// ── Default column sets per view ──────────────────────────────────────────────
+// Fields the user confirmed from their two FiscalData URLs, plus reasonable
+// defaults for Bills and Notes/Bonds. All fields remain available in the
+// column chooser regardless of view.
+
+const DEFAULT_COLS = {
+  all: [
+    'cusip','security_type','security_term','announcemt_date','dated_date',
+    'auction_date','issue_date','maturity_date','int_rate','high_investment_rate',
+    'high_yield','high_price','accrued_int_per1000','reopening',
+    'inflation_index_security','original_security_term','closing_time_comp',
+  ],
+  bills: [
+    'cusip','security_term','announcemt_date','auction_date','issue_date',
+    'maturity_date','high_investment_rate','high_yield','high_price',
+    'offering_amt','reopening','original_security_term','closing_time_comp',
+  ],
+  notesbonds: [
+    'cusip','security_type','security_term','original_security_term',
+    'announcemt_date','dated_date','auction_date','issue_date','maturity_date',
+    'int_rate','high_yield','high_price','accrued_int_per1000',
+    'offering_amt','reopening','closing_time_comp',
+  ],
+  tips: [
+    'cusip','security_term','announcemt_date','dated_date','auction_date',
+    'issue_date','maturity_date','int_rate','high_yield','unadj_price',
+    'adj_price','offering_amt','adj_accrued_int_per1000','ref_cpi_on_dated_date',
+    'ref_cpi_on_issue_date','index_ratio_on_issue_date','reopening',
+    'original_security_term',
+  ],
+};
+
+// ── View row filters ──────────────────────────────────────────────────────────
+const VIEW_FILTER = {
+  all:       null,
+  bills:     r => r.security_type === 'Bill',
+  notesbonds:r => r.security_type !== 'Bill' && r.inflation_index_security !== 'Yes',
+  tips:      r => r.inflation_index_security === 'Yes',
+};
+
+// ── Pretty column labels ──────────────────────────────────────────────────────
+const FIELD_LABELS = {
+  cusip: 'CUSIP', security_type: 'Type', security_term: 'Term',
+  announcemt_date: 'Announced', dated_date: 'Dated Date',
+  auction_date: 'Auction Date', issue_date: 'Issue Date',
+  maturity_date: 'Maturity', original_security_term: 'Orig Term',
+  int_rate: 'Coupon', high_investment_rate: 'High Inv Rate',
+  high_yield: 'High Yield', low_yield: 'Low Yield',
+  avg_med_yield: 'Avg/Med Yield', avg_med_investment_rate: 'Avg/Med Inv Rate',
+  high_price: 'High Price', low_price: 'Low Price', avg_med_price: 'Avg/Med Price',
+  accrued_int_per1000: 'Accrued/$1K', reopening: 'Reopen',
+  inflation_index_security: 'TIPS', closing_time_comp: 'Close Time (Comp)',
+  closing_time_noncomp: 'Close Time (Noncomp)',
+  unadj_price: 'Unadj Price', adj_price: 'Adj Price',
+  offering_amt: 'Offering Amt', adj_accrued_int_per1000: 'Adj Accrued/$1K',
+  ref_cpi_on_dated_date: 'Ref CPI (Dated)', ref_cpi_on_issue_date: 'Ref CPI (Issue)',
+  index_ratio_on_issue_date: 'Index Ratio',
+  bid_to_cover_ratio: 'Bid/Cover',
+  comp_accepted: 'Comp Accepted', comp_tendered: 'Comp Tendered',
+  noncomp_accepted: 'Noncomp Accepted', noncomp_tendered: 'Noncomp Tendered',
+  total_accepted: 'Total Accepted', total_tendered: 'Total Tendered',
+  primary_dealer_accepted: 'Primary Dealer Acc', primary_dealer_tendered: 'Primary Dealer Ten',
+  direct_bidder_accepted: 'Direct Bidder Acc', direct_bidder_tendered: 'Direct Bidder Ten',
+  indirect_bidder_accepted: 'Indirect Bidder Acc', indirect_bidder_tendered: 'Indirect Bidder Ten',
+  frn_index_determination_date: 'FRN Index Date', frn_index_determination_rate: 'FRN Index Rate',
+  lut_dt: 'Last Updated',
+};
+
+function fieldLabel(f) {
+  return FIELD_LABELS[f] || f.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ── Format detection by field name ────────────────────────────────────────────
+function detectFmt(f) {
+  if (f.endsWith('_date') || f.endsWith('_dt')) return 'date';
+  if (f.includes('_rate') || f.includes('_yield')) return 'pct3';
+  if (f.includes('price')) return 'num4';
+  if (f.includes('cpi')) return 'num3';
+  if (f === 'bid_to_cover_ratio') return 'num2';
+  if (f.includes('ratio') || f.includes('accrued')) return 'num6';
+  if (f.includes('amt') || f.includes('accepted') || f.includes('tendered')) return 'amt';
+  return null;
+}
+
+function fmtVal(v, fmt) {
+  if (v === '' || v == null) return '';
+  const n = parseFloat(v);
+  switch (fmt) {
+    case 'date': if (v.length >= 10) { const [y,m,d] = v.substring(0,10).split('-'); return `${m}/${d}/${y}`; } return v;
+    case 'pct3': return isNaN(n) ? v : n.toFixed(3) + '%';
+    case 'num2': return isNaN(n) ? v : n.toFixed(2);
+    case 'num3': return isNaN(n) ? v : n.toFixed(3);
+    case 'num4': return isNaN(n) ? v : n.toFixed(4);
+    case 'num6': return isNaN(n) ? v : n.toFixed(6);
+    case 'amt':  return isNaN(n) ? v : n.toLocaleString();
+    default:     return v;
+  }
+}
+
+// ── CSV parser ────────────────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const headers = splitLine(lines[0]);
+  const rows = lines.slice(1).filter(l => l.trim()).map(line => {
+    const vals = splitLine(line);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
+    return obj;
+  });
+  return { headers, rows };
+}
+
+function splitLine(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (const ch of line) {
+    if (ch === '"') inQ = !inQ;
+    else if (ch === ',' && !inQ) { out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allData = [];
+let allColumns = [];           // all column names from CSV, in CSV order
+let activeView = 'all';
+let sortCol = null;
+let sortAsc = false;
+let filters = {};              // field -> filter string
+let dateFrom = '';
+let dateTo = '';
+
+const ROW_LIMIT = 100;        // default cap for non-TIPS views when no date range set
+
+// Per-view visible column sets (starts as defaults, user-adjustable)
+const viewCols = {
+  all:        new Set(DEFAULT_COLS.all),
+  bills:      new Set(DEFAULT_COLS.bills),
+  notesbonds: new Set(DEFAULT_COLS.notesbonds),
+  tips:       new Set(DEFAULT_COLS.tips),
+};
+
+// ── Status ────────────────────────────────────────────────────────────────────
+function setStatus(msg, isError = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isError ? 'error' : '';
+}
+
+// ── Sidebar: column chooser ───────────────────────────────────────────────────
+function renderColList() {
+  const search = document.getElementById('colSearch').value.toLowerCase();
+  const visible = viewCols[activeView];
+  const list = document.getElementById('colList');
+
+  list.innerHTML = allColumns.map(f => {
+    const label = fieldLabel(f);
+    const hidden = search && !label.toLowerCase().includes(search) && !f.toLowerCase().includes(search);
+    const checked = visible.has(f);
+    return `<div class="col-item${hidden ? ' hidden' : ''}" data-field="${f}">
+      <input type="checkbox" id="col_${f}" ${checked ? 'checked' : ''}>
+      <label for="col_${f}">${label}</label>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.col-item input').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const f = e.target.closest('.col-item').dataset.field;
+      if (e.target.checked) viewCols[activeView].add(f);
+      else viewCols[activeView].delete(f);
+      renderTable();
+    });
+  });
+}
+
+// ── Active/filtered data ──────────────────────────────────────────────────────
+function getActiveRows() {
+  const filter = VIEW_FILTER[activeView];
+  let rows = filter ? allData.filter(filter) : allData;
+
+  // Apply date range filter on auction_date
+  if (dateFrom) rows = rows.filter(r => r.auction_date >= dateFrom);
+  if (dateTo)   rows = rows.filter(r => r.auction_date <= dateTo);
+
+  // Apply column filters
+  const activeFilters = Object.entries(filters).filter(([, v]) => v);
+  if (activeFilters.length) {
+    rows = rows.filter(r =>
+      activeFilters.every(([f, v]) =>
+        (r[f] || '').toLowerCase().includes(v.toLowerCase())
+      )
+    );
+  }
+
+  // Sort
+  if (sortCol !== null) {
+    const field = sortCol;
+    rows = [...rows].sort((a, b) => {
+      const av = a[field] ?? '';
+      const bv = b[field] ?? '';
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortAsc ? cmp : -cmp;
+    });
+  }
+
+  // Pagination: cap at ROW_LIMIT unless TIPS view or date range is active
+  const totalRows = rows.length;
+  const capped = activeView !== 'tips' && !dateFrom && !dateTo;
+  const displayRows = capped ? rows.slice(0, ROW_LIMIT) : rows;
+
+  return { displayRows, totalRows, capped };
+}
+
+// ── Render table ──────────────────────────────────────────────────────────────
+function renderTable() {
+  const cols = allColumns.filter(f => viewCols[activeView].has(f));
+  const rows = getActiveRows();
+
+  // Header row + filter row
+  const thead = document.getElementById('mainThead');
+  thead.innerHTML = `
+    <tr>
+      ${cols.map(f => {
+        const cls = sortCol === f ? (sortAsc ? 'sort-asc' : 'sort-desc') : '';
+        return `<th class="${cls}" data-field="${f}">${fieldLabel(f)}</th>`;
+      }).join('')}
+    </tr>
+    <tr class="filter-row">
+      ${cols.map(f => {
+        const val = filters[f] || '';
+        return `<td><input class="filter-input${val ? ' active' : ''}" type="text" data-field="${f}" value="${val}" placeholder="…"></td>`;
+      }).join('')}
+    </tr>
+  `;
+
+  // Fix filter row sticky top after header renders
+  requestAnimationFrame(() => {
+    const hdr = thead.querySelector('tr:first-child');
+    const filterRow = thead.querySelector('.filter-row');
+    if (hdr && filterRow) {
+      filterRow.querySelectorAll('td').forEach(td => {
+        td.style.top = hdr.offsetHeight + 'px';
+      });
+    }
+  });
+
+  // Sort click handlers on header cells
+  thead.querySelectorAll('th[data-field]').forEach(th => {
+    th.addEventListener('click', () => {
+      const f = th.dataset.field;
+      if (sortCol === f) sortAsc = !sortAsc;
+      else { sortCol = f; sortAsc = true; }
+      renderTable();
+    });
+  });
+
+  // Filter input handlers (debounced)
+  let debounceTimer;
+  thead.querySelectorAll('.filter-input').forEach(inp => {
+    inp.addEventListener('input', e => {
+      const f = e.target.dataset.field;
+      const v = e.target.value;
+      filters[f] = v;
+      e.target.classList.toggle('active', !!v);
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => renderBody(cols), 200);
+    });
+  });
+
+  renderBody(cols);
+}
+
+function renderBody(cols) {
+  const { displayRows, totalRows, capped } = getActiveRows();
+  const tbody = document.getElementById('mainTbody');
+  tbody.innerHTML = displayRows.map(r =>
+    `<tr>${cols.map(f => `<td>${fmtVal(r[f], detectFmt(f))}</td>`).join('')}</tr>`
+  ).join('');
+  const countEl = document.getElementById('row-count');
+  if (capped) {
+    countEl.innerHTML = `<span style="color:#f59e0b;font-weight:600;">Showing ${ROW_LIMIT} of ${totalRows.toLocaleString()} rows — use date range to see more</span>`;
+  } else {
+    countEl.textContent = `${displayRows.length.toLocaleString()} rows`;
+  }
+}
+
+// ── Render upcoming ───────────────────────────────────────────────────────────
+function renderUpcoming(csvText) {
+  const tbody = document.getElementById('upcoming-tbody');
+  const thead = document.getElementById('upcoming-thead');
+  if (!csvText) {
+    thead.innerHTML = '';
+    tbody.innerHTML = '<tr><td style="padding:8px 10px;color:#64748b;font-style:italic;">No upcoming auction data available.</td></tr>';
+    return;
+  }
+  const { headers, rows } = parseCSV(csvText);
+  if (!rows.length) {
+    thead.innerHTML = '';
+    tbody.innerHTML = '<tr><td style="padding:8px 10px;color:#64748b;font-style:italic;">No upcoming auctions found.</td></tr>';
+    return;
+  }
+  thead.innerHTML = headers.map(f => `<th>${fieldLabel(f)}</th>`).join('');
+  tbody.innerHTML = rows.map(r =>
+    `<tr>${headers.map(f => `<td>${fmtVal(r[f], detectFmt(f))}</td>`).join('')}</tr>`
+  ).join('');
+}
+
+// ── Load data ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  setStatus('Fetching data...');
+
+  const [csvResult, upcomingResult] = await Promise.allSettled([
+    fetch(R2_CSV_URL).then(r => { if (!r.ok) throw new Error(`R2 HTTP ${r.status}`); return r.text(); }),
+    fetch(upcomingUrl()).then(r => { if (!r.ok) throw new Error(`Upcoming HTTP ${r.status}`); return r.text(); }),
+  ]);
+
+  if (csvResult.status === 'fulfilled') {
+    const { headers, rows } = parseCSV(csvResult.value);
+    allColumns = headers;
+    allData = rows;
+    renderColList();
+    renderTable();
+  } else {
+    setStatus(`Failed to load auction data: ${csvResult.reason}`, true);
+    console.error(csvResult.reason);
+    return;
+  }
+
+  renderUpcoming(upcomingResult.status === 'fulfilled' ? upcomingResult.value : null);
+  if (upcomingResult.status === 'rejected') console.warn('Upcoming fetch failed:', upcomingResult.reason);
+
+  setStatus(`Updated: ${new Date().toLocaleTimeString()}`);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  // View tab buttons
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeView = btn.dataset.view;
+      filters = {};
+      sortCol = null;
+      sortAsc = false;
+      dateFrom = ''; dateTo = '';
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      renderColList();
+      renderTable();
+    });
+  });
+
+  // Column search
+  document.getElementById('colSearch').addEventListener('input', renderColList);
+
+  // Reset defaults
+  document.getElementById('resetColsBtn').addEventListener('click', () => {
+    viewCols[activeView] = new Set(DEFAULT_COLS[activeView]);
+    renderColList();
+    renderTable();
+  });
+
+  // Clear filters
+  document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+    filters = {};
+    renderTable();
+  });
+
+  // Date range
+  document.getElementById('dateFrom').addEventListener('change', e => { dateFrom = e.target.value; renderTable(); });
+  document.getElementById('dateTo').addEventListener('change', e => { dateTo = e.target.value; renderTable(); });
+  document.getElementById('clearDateBtn').addEventListener('click', () => {
+    dateFrom = ''; dateTo = '';
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value = '';
+    renderTable();
+  });
+
+  // Refresh
+  document.getElementById('refreshBtn').addEventListener('click', loadData);
+
+  loadData();
+}
+
+init();

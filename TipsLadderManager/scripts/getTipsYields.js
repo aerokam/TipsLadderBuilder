@@ -1,3 +1,15 @@
+// Load .env from repo root if present (local dev); does not override GH Actions env vars
+import { existsSync, readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+const _envPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../.env');
+if (existsSync(_envPath)) {
+  readFileSync(_envPath, 'utf8').split('\n').forEach(line => {
+    const m = line.match(/^\s*([^#\s][^=]*?)\s*=\s*(.*?)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  });
+}
+
 // Fetch TIPS prices from FedInvest, merge with TipsRef.csv metadata, calculate yields.
 // Reads TipsRef.csv from R2 for base CPI / coupon metadata.
 // Writes TipsYields.csv to R2 with settlement date, price, and yield per CUSIP.

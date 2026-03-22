@@ -531,6 +531,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
     let lBefore = 0;
     for (const y in araLaterMaturityInterestByYear) if (parseInt(y) > year) lBefore += araLaterMaturityInterestByYear[y];
     let pB = 0, cB = 0;
+    const holdingsBefore = [];
     if (yearInfo[year]) {
       for (const h of yearInfo[year].holdings) {
         const b = tipsMap.get(h.cusip);
@@ -540,13 +541,15 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
         const q = isBT ? Math.min(bracketTargetFundedYearQtyBefore[year] ?? 0, h.qty) : h.qty;
         const m = h.maturity.getMonth() + 1;
         pB += q * ap; cB += q * ap * b.coupon * (m < 7 ? 0.5 : 1.0);
+        holdingsBefore.push({ cusip: h.cusip, maturityMonth: m - 1, maturityYear: h.maturity.getFullYear(), qty: q, principalPerBond: ap, nPeriods: m < 7 ? 1 : 2, coupon: b?.coupon ?? 0 });
       }
     }
     beforeARAByYear[year] = pB + cB + lBefore;
-    beforeARABreakdown[year] = { principal: pB, ownCoupon: cB, laterMatInt: lBefore };
+    beforeARABreakdown[year] = { principal: pB, ownCoupon: cB, laterMatInt: lBefore, holdings: holdingsBefore };
 
     const lAfter = yearLaterMatIntSnapshot[year] ?? 0;
     let pA = 0, cA = 0;
+    const holdingsAfter = [];
     if (yearInfo[year]) {
       for (const h of yearInfo[year].holdings) {
         const b = tipsMap.get(h.cusip);
@@ -556,6 +559,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
         const q = isBT ? buySellTargets[year].targetFundedYearQty : (postRebalQtyMap[h.cusip] ?? h.qty);
         const m = h.maturity.getMonth() + 1;
         pA += q * ap; cA += q * ap * b.coupon * (m < 7 ? 0.5 : 1.0);
+        holdingsAfter.push({ cusip: h.cusip, maturityMonth: m - 1, maturityYear: h.maturity.getFullYear(), qty: q, principalPerBond: ap, nPeriods: m < 7 ? 1 : 2, coupon: b?.coupon ?? 0 });
       }
     }
     // Include target CUSIP funded-year contribution when it has no current holdings (new bracket buy)
@@ -568,11 +572,12 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
           const _m4 = _tb4.maturity.getMonth() + 1;
           pA += _bst4.targetFundedYearQty * _ap4;
           cA += _bst4.targetFundedYearQty * _ap4 * _tb4.coupon * (_m4 < 7 ? 0.5 : 1.0);
+          holdingsAfter.push({ cusip: _bst4.targetCUSIP, maturityMonth: _m4 - 1, maturityYear: _tb4.maturity.getFullYear(), qty: _bst4.targetFundedYearQty, principalPerBond: _ap4, nPeriods: _m4 < 7 ? 1 : 2, coupon: _tb4.coupon ?? 0 });
         }
       }
     }
     postARAByYear[year] = pA + cA + lAfter;
-    postARABreakdown[year] = { principal: pA, ownCoupon: cA, laterMatInt: lAfter };
+    postARABreakdown[year] = { principal: pA, ownCoupon: cA, laterMatInt: lAfter, holdings: holdingsAfter };
   }
 
   // Summary Metrics
@@ -671,9 +676,11 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
       araBeforePrincipal:   isLast ? (beforeARABreakdown[h.year]?.principal   ?? 0) : null,
       araBeforeOwnCoupon:   isLast ? (beforeARABreakdown[h.year]?.ownCoupon   ?? 0) : null,
       araBeforeLaterMatInt: isLast ? (beforeARABreakdown[h.year]?.laterMatInt ?? 0) : null,
+      araBeforeHoldings:    isLast ? (beforeARABreakdown[h.year]?.holdings   ?? []) : null,
       araAfterPrincipal:    isLast ? (postARABreakdown[h.year]?.principal    ?? 0) : null,
       araAfterOwnCoupon:    isLast ? (postARABreakdown[h.year]?.ownCoupon    ?? 0) : null,
       araAfterLaterMatInt:  isLast ? (postARABreakdown[h.year]?.laterMatInt  ?? 0) : null,
+      araAfterHoldings:     isLast ? (postARABreakdown[h.year]?.holdings     ?? []) : null,
       nPeriods: (h.maturity.getMonth() + 1 < 7 ? 1 : 2)
     });
     const rowDARA = daraByYear?.get(h.year) ?? DARA;
