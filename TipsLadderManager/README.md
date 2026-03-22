@@ -16,6 +16,16 @@ All calculations run locally in your browser — no data is uploaded anywhere.
 
 ---
 
+## Traceability & Deep Drill
+
+This tool is designed for **transparency first**. Every number in the UI is traceable to its source:
+- **Level 1: UI Summary**: Actionable ladder totals and rung details.
+- **Level 2: The Drill-Down**: Click any underlined value (Amount, Cost, etc.) to see the exact calculation chain.
+- **Level 3: The Component Math**: Click nested variables within popups (like **Index Ratio** or **Ref CPI**) to see the underlying interpolation math and official formulas.
+- **Level 4: Legal Authority**: Deep-links to the **Code of Federal Regulations (31 CFR § 356)** are provided within math popups for institutional-grade verification.
+
+---
+
 ## Key Concepts
 
 **TIPS** — Treasury Inflation Protected Securities: Treasury notes and bonds whose principal adjusts daily with inflation as measured by CPI-U. Coupon interest is paid semi-annually, and is calculated based on the inflation-adjusted principal. At maturity you receive the inflation-adjusted principal plus the final coupon payment. All amounts shown in the application are in *real* (inflation-adjusted, today's dollars) terms.

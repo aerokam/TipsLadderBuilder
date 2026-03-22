@@ -52,6 +52,12 @@
   td.drillable { cursor: pointer; text-decoration: underline dotted #94a3b8; }
   td.drillable:hover { background: #fef9c3 !important; text-decoration: underline solid #475569; }
 
+  /* ── Formula inspector ── */
+  .source-highlight { background: #fef9c3 !important; transition: background 0.15s; }
+  .drill-l3:hover { background: #fef9c3 !important; }
+  .formula-var { cursor: help; border-bottom: 1px dashed #94a3b8; }
+  .formula-var:hover { color: #1a56db; border-bottom-style: solid; }
+
 
   /* ── Simple table ── */
   table.simple { border-collapse: collapse; width: auto; font-size: 13px; }
@@ -121,6 +127,9 @@
     <p><b>Gap Years</b> — Years with no issued TIPS (currently 2037–2039). The ladder holds excess bonds in <b>bracket</b> years flanking the gap to match the average duration of the missing maturities.</p>
     <p><b>Bracket Years</b> — <i>Upper bracket</i>: always the Feb 2040 TIPS. <i>Lower bracket</i>: for Build and 2-bracket Rebalance, the latest issued 10-year TIPS before the gap; for Rebalance, defaults to the TIPS before the gap with the largest existing holdings (original lower). In <i>3-bracket mode</i>, the original lower bracket excess is held as-is; a second lower bracket (the Jan TIPS just before the gap — "new lower") is bought to supplement. Excess bonds in bracket years duration-match the gap.</p>
     <p><b>Ref CPI</b> — Reference CPI value used for all inflation adjustments. Defaults to the settlement date. Click the Ref CPI value in the info strip to override the reference date (useful for projecting with a future or past CPI). Changing it clears any auto-inferred DARA.</p>
+
+    <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Traceability & Deep Drill</h3>
+    <p>Every number in the UI is explainable. Click any underlined value (like Amount or Cost) to open a <b>Level 2</b> drill-down showing the calculation chain. Inside those popups, you can click variables like <b>Index Ratio</b> or <b>Ref CPI</b> for a <b>Level 3</b> breakdown of the underlying math and <b>Level 4</b> deep-links to the official Code of Federal Regulations.</p>
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Mode: Rebalance</h3>
     <p>For existing TIPS ladder holders. Sells excess bracket bonds and buys into newly available maturities (former gap years). Support for extending the ladder beyond 2040 is included.</p>
@@ -281,7 +290,7 @@
 import { buildTipsMapFromYields, localDate, runRebalance, inferDARAFromCash, yieldFromPrice } from './src/rebalance-lib.js';
 import { runBuild } from './src/build-lib.js';
 import { renderTable } from './src/render.js';
-import { buildDrillHTML, buildDurationPopupRows } from './src/drill.js';
+import { buildDrillHTML, buildDurationPopupRows, buildIndexRatioDrill, buildRefCpiDrill } from './src/drill.js';
 import { showPopup, hidePopup } from './src/popup.js';
 import { fetchTipsData, lookupRefCpi } from './src/data.js';
 window.lookupRefCpi = lookupRefCpi;
@@ -624,6 +633,122 @@ function updateRebalLastYearDropdown() {
   fieldDiv.style.display = '';
 }
 
+// ─── File Parsing & State ─────────────────────────────────────────────────────
+let currentHoldingsArray = null;
+
+document.getElementById('holdings-file').addEventListener('change', async (e) => {
+  currentHoldingsArray = null;
+  setStatus('');
+  _clearAutoDara();
+  if (!e.target.files.length) return;
+  
+  try {
+    const text = await e.target.files[0].text();
+    const rawLines = text.trim().split('\n').filter(l => l.trim());
+    if (rawLines.length === 0) { setStatus('Holdings CSV is empty.', true); return; }
+
+    const firstFewLines = rawLines.slice(0, 20).join('\n').toLowerCase();
+    const isBrokerCSV = firstFewLines.includes('account number') ||
+                        firstFewLines.includes('account name') ||
+                        firstFewLines.includes('positions for') ||
+                        (firstFewLines.includes('symbol') && firstFewLines.includes('quantity'));
+
+    if (isBrokerCSV) {
+      const parsedAccounts = parseBrokerCSV(text, tipsMap);
+      const acctNames = Object.keys(parsedAccounts);
+      if (acctNames.length === 0) { setStatus('No TIPS found in broker export.', true); return; }
+
+      if (acctNames.length === 1) {
+        currentHoldingsArray = parsedAccounts[acctNames[0]];
+        setStatus(`Loaded 1 account: ${acctNames[0]} (${currentHoldingsArray.length} TIPS).`);
+        updateRebalLastYearDropdown();
+        renderDaraByYearPanel();
+      } else {
+        window._pendingBrokerAccounts = parsedAccounts;
+        const listEl = document.getElementById('account-list');
+        listEl.innerHTML = acctNames.map(name => {
+          const pos = parsedAccounts[name].length;
+          const count = parsedAccounts[name].reduce((s, p) => s + p.qty, 0);
+          return `<label style="display:flex;align-items:center;margin-bottom:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" value="${esc(name)}" checked style="margin-right:8px;width:16px;height:16px;">
+            <b>${esc(name)}</b> <span style="color:#64748b;margin-left:6px;font-size:12px;">(${pos} TIPS, ${count} bonds)</span>
+          </label>`;
+        }).join('');
+        document.getElementById('account-overlay').style.display = 'block';
+      }
+    } else {
+      const CUSIP_RE = /^[A-Z0-9]{9}$/i;
+      const startIdx = CUSIP_RE.test(rawLines[0].split(',')[0].trim()) ? 0 : 1;
+      const arr = [];
+      for (let i = startIdx; i < rawLines.length; i++) {
+        const parts   = rawLines[i].split(',').map(s => s.trim());
+        if (parts.length < 2) continue;
+        const [cusip, qtyStr] = parts;
+        if (!CUSIP_RE.test(cusip)) continue;
+        const qty = parseInt(qtyStr, 10);
+        if (!isNaN(qty) && qty >= 0) arr.push({ cusip, qty });
+      }
+      if (arr.length === 0) { setStatus('Holdings CSV has no valid data rows.', true); return; }
+      currentHoldingsArray = arr;
+      setStatus(`Loaded standard CSV (${arr.length} TIPS).`);
+      updateRebalLastYearDropdown();
+      renderDaraByYearPanel();
+    }
+  } catch (err) {
+    setStatus('Error reading file: ' + err.message, true);
+  }
+});
+
+// ─── Account selection modal events ───────────────────────────────────────────
+  document.getElementById('account-confirm').addEventListener('click', () => {
+    document.getElementById('account-overlay').style.display = 'none';
+    _clearAutoDara();
+    const selected = Array.from(document.querySelectorAll('#account-list input:checked')).map(cb => cb.value);
+    if (selected.length === 0) { setStatus('No accounts selected.', true); return; }
+
+    let combined = [];
+    for (const name of selected) combined = combined.concat(window._pendingBrokerAccounts[name]);
+    currentHoldingsArray = combined;
+    setStatus(`Loaded ${selected.length} account(s) (${combined.length} TIPS total).`);
+    updateRebalLastYearDropdown();
+    renderDaraByYearPanel();
+  });
+  document.getElementById('account-cancel').addEventListener('click', () => {
+    document.getElementById('account-overlay').style.display = 'none';
+    setStatus('Account selection cancelled. No file loaded.', true);
+    currentHoldingsArray = null;
+    document.getElementById('holdings-file').value = '';
+  });
+  document.getElementById('account-overlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) document.getElementById('account-cancel').click();
+  });
+
+// ─── Draggable drill modal ──────────────────────────────────────────────────────────────────────────────────────
+let _drillDragging = false;
+{
+  const _modal = document.getElementById('drill-modal');
+  const _title = document.getElementById('drill-title');
+  let _offX = 0, _offY = 0;
+  _title.addEventListener('mousedown', e => {
+    const rect = _modal.getBoundingClientRect();
+    _modal.style.transform = 'none';
+    _modal.style.left = rect.left + 'px';
+    _modal.style.top  = rect.top  + 'px';
+    _offX = e.clientX - rect.left;
+    _offY = e.clientY - rect.top;
+    _drillDragging = true;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!_drillDragging) return;
+    _modal.style.left = (e.clientX - _offX) + 'px';
+    _modal.style.top  = (e.clientY - _offY) + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (_drillDragging) setTimeout(() => { _drillDragging = false; }, 0);
+  });
+}
+
 // ─── Per-year DARA panel ──────────────────────────────────────────────────────
 let _daraByYearPanelDefault = null;
 let _daraByYearStore = new Map();  // year → value; persists across year-range changes
@@ -891,6 +1016,8 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 });
 
 // ─── Drill-down event wiring ────────────────────────────────────────────────────────────
+let currentDrillData = null;
+
 document.getElementById('build-table').addEventListener('click', e => {
   const td = e.target.closest('td.drillable');
   if (!td || !buildDetails) return;
@@ -898,6 +1025,7 @@ document.getElementById('build-table').addEventListener('click', e => {
   const key = td.dataset.col;
   const d   = buildDetails[ri];
   if (!d) return;
+  currentDrillData = d;
   const colNames = { amount: 'Amount', cost: 'Cost', gapAmount: 'Gap Amount', gapCost: 'Gap Cost' };
   const suffix   = (key === 'gapAmount' || key === 'gapCost') ? ' (bracket)' : '';
   document.getElementById('drill-title').textContent =
@@ -908,6 +1036,61 @@ document.getElementById('build-table').addEventListener('click', e => {
   _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';
   _ov.style.display = 'block';
 });
+
+document.getElementById('simple-table').addEventListener('click', e => {
+  const td = e.target.closest('td.drillable');
+  if (!td || !rebalDetails) return;
+  const ri  = parseInt(td.dataset.row, 10);
+  const key = td.dataset.col;
+  const d   = rebalDetails[ri];
+  if (!d) return;
+  currentDrillData = d;
+  const colNames = { amtBefore: 'Amount Before', amtAfter: 'Amount After',
+    excessBefore: 'Excess Before', excessAfter: 'Excess After',
+    qtyBefore: 'Qty Before', qtyAfter: 'Qty After', cashDelta: 'Cash Δ',
+    costBefore: 'Cost Before', costAfter: 'Cost After',
+    gapAmtBefore: 'Gap Amount Before', gapAmtAfter: 'Gap Amount After',
+    gapCostBefore: 'Gap Cost Before', gapCostAfter: 'Gap Cost After',
+    gapCashDelta: 'Gap Cash Δ' };
+  document.getElementById('drill-title').textContent =
+    colNames[key] + ' — FY ' + d.fundedYear + ' · ' + d.cusip + ' · ' + d.maturityStr;
+  document.getElementById('drill-content').innerHTML = buildDrillHTML(d, key, rebalSummary);
+  const _ov = document.getElementById('drill-overlay');
+  const _dm = document.getElementById('drill-modal');
+  _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';
+  _ov.style.display = 'block';
+});
+
+document.getElementById('drill-content').addEventListener('click', e => {
+  const target = e.target.closest('.drill-l3');
+  if (!target || !currentDrillData) return;
+  const key = target.dataset.l3;
+  let rows = [];
+  let title = '';
+  let bc = 'Ladder \u203a FY ' + currentDrillData.fundedYear + ' \u203a ' + currentDrillData.cusip;
+  if (key === 'refCPI') {
+    const builder = (comp) => buildRefCpiDrill(currentDrillData, comp);
+    showPopup(target, 'Ref CPI Interpolation', builder, bc + ' \u203a Ref CPI', 'quant');
+  } else if (key === 'indexRatio') {
+    const rows = buildIndexRatioDrill(currentDrillData);
+    showPopup(target, 'Index Ratio Calculation', rows, bc + ' \u203a Index Ratio');
+  }
+});
+
+document.getElementById('drill-content').addEventListener('mouseover', e => {
+  const target = e.target.closest('.formula-var');
+  if (!target) return;
+  const sourceId = target.dataset.source;
+  if (!sourceId) return;
+  const sourceEl = document.querySelector('#drill-content [data-row-id="' + sourceId + '"]');
+  if (sourceEl) sourceEl.closest('tr').classList.add('source-highlight');
+});
+document.getElementById('drill-content').addEventListener('mouseout', e => {
+  const target = e.target.closest('.formula-var');
+  if (!target) return;
+  document.querySelectorAll('#drill-content .source-highlight').forEach(el => el.classList.remove('source-highlight'));
+});
+
 document.getElementById('drill-close').addEventListener('click', () => {
   document.getElementById('drill-overlay').style.display = 'none';
 });
@@ -928,121 +1111,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ─── File Parsing & State ─────────────────────────────────────────────────────
-let currentHoldingsArray = null;
-
-document.getElementById('holdings-file').addEventListener('change', async (e) => {
-  currentHoldingsArray = null;
-  setStatus('');
-  _clearAutoDara();
-  if (!e.target.files.length) return;
-  
-  try {
-    const text = await e.target.files[0].text();
-    const rawLines = text.trim().split('\n').filter(l => l.trim());
-    if (rawLines.length === 0) { setStatus('Holdings CSV is empty.', true); return; }
-
-    const firstFewLines = rawLines.slice(0, 20).join('\n').toLowerCase();
-    const isBrokerCSV = firstFewLines.includes('account number') ||
-                        firstFewLines.includes('account name') ||
-                        firstFewLines.includes('positions for') ||
-                        (firstFewLines.includes('symbol') && firstFewLines.includes('quantity'));
-
-    if (isBrokerCSV) {
-      const parsedAccounts = parseBrokerCSV(text, tipsMap);
-      const acctNames = Object.keys(parsedAccounts);
-      if (acctNames.length === 0) { setStatus('No TIPS found in broker export.', true); return; }
-
-      if (acctNames.length === 1) {
-        currentHoldingsArray = parsedAccounts[acctNames[0]];
-        setStatus(`Loaded 1 account: ${acctNames[0]} (${currentHoldingsArray.length} TIPS).`);
-        updateRebalLastYearDropdown();
-        renderDaraByYearPanel();
-      } else {
-        window._pendingBrokerAccounts = parsedAccounts;
-        const listEl = document.getElementById('account-list');
-        listEl.innerHTML = acctNames.map(name => {
-          const pos = parsedAccounts[name].length;
-          const count = parsedAccounts[name].reduce((s, p) => s + p.qty, 0);
-          return `<label style="display:flex;align-items:center;margin-bottom:8px;cursor:pointer;font-size:13px;">
-            <input type="checkbox" value="${esc(name)}" checked style="margin-right:8px;width:16px;height:16px;">
-            <b>${esc(name)}</b> <span style="color:#64748b;margin-left:6px;font-size:12px;">(${pos} TIPS, ${count} bonds)</span>
-          </label>`;
-        }).join('');
-        document.getElementById('account-overlay').style.display = 'block';
-      }
-    } else {
-      const CUSIP_RE = /^[A-Z0-9]{9}$/i;
-      const startIdx = CUSIP_RE.test(rawLines[0].split(',')[0].trim()) ? 0 : 1;
-      const arr = [];
-      for (let i = startIdx; i < rawLines.length; i++) {
-        const parts   = rawLines[i].split(',').map(s => s.trim());
-        if (parts.length < 2) continue;
-        const [cusip, qtyStr] = parts;
-        if (!CUSIP_RE.test(cusip)) continue;
-        const qty = parseInt(qtyStr, 10);
-        if (!isNaN(qty) && qty >= 0) arr.push({ cusip, qty });
-      }
-      if (arr.length === 0) { setStatus('Holdings CSV has no valid data rows.', true); return; }
-      currentHoldingsArray = arr;
-      setStatus(`Loaded standard CSV (${arr.length} TIPS).`);
-      updateRebalLastYearDropdown();
-      renderDaraByYearPanel();
-    }
-  } catch (err) {
-    setStatus('Error reading file: ' + err.message, true);
-  }
-});
-
-// ─── Account selection modal events ───────────────────────────────────────────
-  document.getElementById('account-confirm').addEventListener('click', () => {
-    document.getElementById('account-overlay').style.display = 'none';
-    _clearAutoDara();
-    const selected = Array.from(document.querySelectorAll('#account-list input:checked')).map(cb => cb.value);
-    if (selected.length === 0) { setStatus('No accounts selected.', true); return; }
-
-    let combined = [];
-    for (const name of selected) combined = combined.concat(window._pendingBrokerAccounts[name]);
-    currentHoldingsArray = combined;
-    setStatus(`Loaded ${selected.length} account(s) (${combined.length} TIPS total).`);
-    updateRebalLastYearDropdown();
-    renderDaraByYearPanel();
-  });
-  document.getElementById('account-cancel').addEventListener('click', () => {
-    document.getElementById('account-overlay').style.display = 'none';
-    setStatus('Account selection cancelled. No file loaded.', true);
-    currentHoldingsArray = null;
-    document.getElementById('holdings-file').value = '';
-  });
-  document.getElementById('account-overlay').addEventListener('click', e => {
-    if (e.target === e.currentTarget) document.getElementById('account-cancel').click();
-  });
-
-// ─── Draggable drill modal ──────────────────────────────────────────────────────────────────────────────────────
-let _drillDragging = false;
-{
-  const _modal = document.getElementById('drill-modal');
-  const _title = document.getElementById('drill-title');
-  let _offX = 0, _offY = 0;
-  _title.addEventListener('mousedown', e => {
-    const rect = _modal.getBoundingClientRect();
-    _modal.style.transform = 'none';
-    _modal.style.left = rect.left + 'px';
-    _modal.style.top  = rect.top  + 'px';
-    _offX = e.clientX - rect.left;
-    _offY = e.clientY - rect.top;
-    _drillDragging = true;
-    e.preventDefault();
-  });
-  document.addEventListener('mousemove', e => {
-    if (!_drillDragging) return;
-    _modal.style.left = (e.clientX - _offX) + 'px';
-    _modal.style.top  = (e.clientY - _offY) + 'px';
-  });
-  document.addEventListener('mouseup', () => {
-    if (_drillDragging) setTimeout(() => { _drillDragging = false; }, 0);
-  });
-}
 
 // ─── Info-link + header click handler ──────────────────────────────
 const POPUP_TITLES = { range: 'Rebalance Range', duration: 'Duration Calculations' };
@@ -1079,38 +1147,17 @@ document.addEventListener('click', e => {
   if (link) {
     const key  = link.dataset.popup;
     const rows = _infoPopups[key];
-    if (rows) showPopup(link, POPUP_TITLES[key] || key, rows);
+    const bc   = 'Ladder \u203a ' + (POPUP_TITLES[key] || key);
+    if (rows) showPopup(link, POPUP_TITLES[key] || key, rows, bc);
     return;
   }
   const th = e.target.closest('th[data-col]');
   if (th) {
     const rows = COL_HELP[th.dataset.col];
-    if (rows) showPopup(th, th.textContent.trim(), rows);
+    const bc   = 'Ladder \u203a Table Header';
+    if (rows) showPopup(th, th.textContent.trim(), rows, bc);
     return;
   }
-});
-
-document.getElementById('simple-table').addEventListener('click', e => {
-  const td = e.target.closest('td.drillable');
-  if (!td || !rebalDetails) return;
-  const ri  = parseInt(td.dataset.row, 10);
-  const key = td.dataset.col;
-  const d   = rebalDetails[ri];
-  if (!d) return;
-  const colNames = { amtBefore: 'Amount Before', amtAfter: 'Amount After',
-    excessBefore: 'Excess Before', excessAfter: 'Excess After',
-    qtyBefore: 'Qty Before', qtyAfter: 'Qty After', cashDelta: 'Cash Δ',
-    costBefore: 'Cost Before', costAfter: 'Cost After',
-    gapAmtBefore: 'Gap Amount Before', gapAmtAfter: 'Gap Amount After',
-    gapCostBefore: 'Gap Cost Before', gapCostAfter: 'Gap Cost After',
-    gapCashDelta: 'Gap Cash Δ' };
-  document.getElementById('drill-title').textContent =
-    colNames[key] + ' — FY ' + d.fundedYear + ' · ' + d.cusip + ' · ' + d.maturityStr;
-  document.getElementById('drill-content').innerHTML = buildDrillHTML(d, key, rebalSummary);
-  const _ov = document.getElementById('drill-overlay');
-  const _dm = document.getElementById('drill-modal');
-  _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';
-  _ov.style.display = 'block';
 });
 
 document.getElementById('export-csv-btn').addEventListener('click', () => {

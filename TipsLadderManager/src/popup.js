@@ -38,8 +38,23 @@ function _build() {
 
 export function hidePopup() { if (_el) _el.style.display = 'none'; }
 
-export function showPopup(anchorEl, title, rows) {
+let _state = null;
+
+export function showPopup(anchorEl, title, rowsOrBuilder, breadcrumb, initialToggleVal) {
   if (!_el) _build();
+
+  let rows;
+  if (typeof rowsOrBuilder === 'function') {
+    _state = { anchorEl, title, builder: rowsOrBuilder, breadcrumb, currentToggleVal: initialToggleVal };
+    rows = rowsOrBuilder(initialToggleVal);
+  } else {
+    _state = null;
+    rows = rowsOrBuilder;
+  }
+
+  const bcHTML = breadcrumb
+    ? '<div style="font-size:10px;color:#64748b;margin-bottom:2px;text-transform:uppercase;letter-spacing:0.02em;">' + breadcrumb + '</div>'
+    : '';
 
   // Render rows into 2-column table (label+note | value)
   let trs = '';
@@ -49,9 +64,25 @@ export function showPopup(anchorEl, title, rows) {
              '<hr style="border:none;border-top:1px dashed #e2e8f0;margin:0"></td></tr>';
       continue;
     }
+    if (r.toggle) {
+      trs += '<tr><td colspan="2" style="padding:4px 0">' +
+             '<div style="display:flex;background:#f1f5f9;border-radius:4px;padding:2px;gap:2px;">' +
+               r.toggle.options.map(opt => 
+                 '<button class="sp-toggle-btn" data-val="' + opt.value + '" ' +
+                 'style="flex:1;border:none;border-radius:3px;padding:3px 0;font-size:10px;font-weight:700;cursor:pointer;' +
+                 (opt.active ? 'background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.1);color:#1e293b;' : 'background:none;color:#64748b;') + '">' +
+                 opt.label + '</button>'
+               ).join('') +
+             '</div></td></tr>';
+      continue;
+    }
     if (r.heading != null) {
       trs += '<tr><td colspan="2" style="padding:4px 0 2px;font-size:10px;font-weight:700;' +
              'color:#64748b;text-transform:uppercase;letter-spacing:.05em">' + r.heading + '</td></tr>';
+      continue;
+    }
+    if (r.html) {
+      trs += '<tr><td colspan="2" style="padding:4px 0">' + r.html + '</td></tr>';
       continue;
     }
     const ts  = r.total
@@ -78,7 +109,10 @@ export function showPopup(anchorEl, title, rows) {
   _el.innerHTML =
     '<div class="sp-hdr" style="display:flex;justify-content:space-between;align-items:center;' +
     'padding:7px 10px 7px 14px;border-bottom:1px solid #e2e8f0;cursor:move;user-select:none">' +
-      '<span style="font-size:12px;font-weight:700;color:#1e293b;white-space:nowrap">' + title + '</span>' +
+      '<div style="display:flex;flex-direction:column;min-width:0;flex:1">' +
+        bcHTML +
+        '<span style="font-size:12px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + title + '</span>' +
+      '</div>' +
       '<button style="background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;' +
               'line-height:1;padding:0 0 0 12px;flex-shrink:0" ' +
               'id="sp-close" style="cursor:pointer;background:none;border:none;font-size:18px;color:#94a3b8;padding:0 0 0 12px">×</button>' +
@@ -86,6 +120,14 @@ export function showPopup(anchorEl, title, rows) {
     '<div style="padding:10px 14px">' + table + '</div>';
 
   _el.querySelector('#sp-close').addEventListener('click', hidePopup);
+  _el.querySelectorAll('.sp-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (_state && _state.builder) {
+        const newVal = btn.dataset.val;
+        showPopup(_state.anchorEl, _state.title, _state.builder, _state.breadcrumb, newVal);
+      }
+    });
+  });
   _el.style.display = 'block';
 
   // Position: below anchor, clamped to viewport

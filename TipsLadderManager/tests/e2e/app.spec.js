@@ -221,7 +221,54 @@ test('drill popup: closes on backdrop click', async ({ page }) => {
   await expect(page.locator('#drill-overlay')).not.toBeVisible();
 });
 
-// ── 7. Error handling ─────────────────────────────────────────────────────────
+// ── 8. Level 3 Drill-down ────────────────────────────────────────────────────
+test('drill popup: clicking Ref CPI in Level 2 opens Level 3 Ref CPI popup', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  await page.locator('#simple-table tbody td[data-col]').first().click();
+  await expect(page.locator('#drill-overlay')).toBeVisible();
+
+  const refCpiLabel = page.locator('.drill-l3[data-l3="refCPI"]');
+  await expect(refCpiLabel).toBeVisible();
+  await refCpiLabel.click();
+
+  const l3Popup = page.locator('#shared-popup');
+  await expect(l3Popup).toBeVisible();
+  await expect(l3Popup).toContainText('Ref CPI Interpolation');
+  await expect(l3Popup).toContainText('Interpolation Formula');
+  
+  // Check for CFR link
+  const cfrLink = l3Popup.locator('a[href*="356"]');
+  await expect(cfrLink).toBeVisible();
+
+  await l3Popup.locator('#sp-close').click();
+  await expect(l3Popup).not.toBeVisible();
+});
+
+test('drill popup: clicking Index Ratio in Level 2 opens Level 3 Index Ratio popup', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  await page.locator('#simple-table tbody td[data-col]').first().click();
+  await expect(page.locator('#drill-overlay')).toBeVisible();
+
+  const irLabel = page.locator('.drill-l3[data-l3="indexRatio"]');
+  await expect(irLabel).toBeVisible();
+  await irLabel.click();
+
+  const l3Popup = page.locator('#shared-popup');
+  await expect(l3Popup).toBeVisible();
+  await expect(l3Popup).toContainText('Index Ratio Calculation');
+  await expect(l3Popup).toContainText('Authority');
+
+  await l3Popup.locator('#sp-close').click();
+  await expect(l3Popup).not.toBeVisible();
+});
+
+// ── 9. Error handling ─────────────────────────────────────────────────────────
 test('rebalance: running without holdings file shows status error', async ({ page, context }) => {
   // Block the pre-populate fetch so no sample file is loaded into the input
   await page.route('**/tests/CusipQtyTestLumpy.csv', r => r.abort());
