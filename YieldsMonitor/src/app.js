@@ -1,4 +1,5 @@
 // Treasury Yields Monitor - app.js
+import { handleChartKeydown } from '../../shared/src/chart-keys.js';
 
 const AVAILABLE_SYMBOLS = {
   // TIPS
@@ -52,6 +53,12 @@ async function init() {
 
   window.addEventListener('resize', () => {
     Object.values(charts).forEach(c => c.resize());
+  });
+
+  window.addEventListener('keydown', (e) => {
+    Object.values(charts).forEach(chart => {
+      handleChartKeydown(e, chart);
+    });
   });
 }
 

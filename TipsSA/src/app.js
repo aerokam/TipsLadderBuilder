@@ -1,5 +1,6 @@
 // TIPS Seasonal Adjustment (TipsSA) Frontend Logic
 import { yieldFromPrice } from '../../shared/src/bond-math.js';
+import { handleChartKeydown } from '../../shared/src/chart-keys.js';
 
 const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
 const YIELDS_CSV_URL = `${R2_BASE_URL}/TIPS/TipsYields.csv`;
@@ -101,6 +102,10 @@ async function init() {
     });
 
     processAndRender();
+
+    window.addEventListener('keydown', (e) => {
+      handleChartKeydown(e, chart, { onAction: ({chart}) => updateDynamicTicks(chart) });
+    });
 
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
