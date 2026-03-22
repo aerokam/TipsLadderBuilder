@@ -67,6 +67,84 @@ function nextBusinessDay(date, holidaySet) {
   return d;
 }
 
+// ─── Lightweight Popup Logic ──────────────────────────────────────────────────
+function _showDrillPopup(title, html) {
+  let ov = document.getElementById('drill-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'drill-overlay';
+    ov.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.innerHTML = `
+      <div id="drill-modal" style="background:#fff;width:100%;max-width:600px;max-height:90vh;border-radius:8px;display:flex;flex-direction:column;box-shadow:0 10px 25px rgba(0,0,0,0.2);position:relative;overflow:hidden;">
+        <button id="drill-close" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:24px;color:#94a3b8;cursor:pointer;line-height:1;">\u00d7</button>
+        <div id="drill-title" style="padding:16px 20px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#1e293b;font-size:14px;flex-shrink:0;"></div>
+        <div id="drill-content" style="padding:20px;overflow-y:auto;font-size:13px;line-height:1.6;color:#334155;flex:1;"></div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.style.display = 'none'; });
+    ov.querySelector('#drill-close').onclick = () => ov.style.display = 'none';
+  }
+  ov.querySelector('#drill-title').textContent = title;
+  ov.querySelector('#drill-content').innerHTML = html;
+  ov.style.display = 'flex';
+}
+
+async function _showIntuitionGuide() {
+  try {
+    const res = await fetch('./knowledge/4.0_SA_Intuition.md');
+    const md = await res.text();
+    // Simple MD to HTML conversion for the guide
+    const html = md
+      .replace(/^# (.*$)/gm, '<h1 style="font-size:1.5em;margin:0 0 16px;color:#1a56db;">$1</h1>')
+      .replace(/^## (.*$)/gm, '<h2 style="font-size:1.2em;margin:20px 0 12px;color:#1e293b;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">$1</h2>')
+      .replace(/^### (.*$)/gm, '<h3 style="font-size:1em;margin:16px 0 8px;color:#334155;">$1</h3>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/^- (.*$)/gm, '<li style="margin-bottom:6px;">$1</li>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/^/, '<p>')
+      .replace(/$/, '</p>')
+      .replace(/<p><li>/g, '<ul style="margin-bottom:16px;"><li>')
+      .replace(/<\/li><\/p>/g, '</li></ul>');
+    
+    _showDrillPopup('Intuition: Seasonal Adjustments', html);
+  } catch (err) {
+    alert('Failed to load guide: ' + err.message);
+  }
+}
+
+function _showSaDrill(cusip) {
+  // Find the bond in our current processed list
+  const bond = window._currentBonds.find(b => b.cusip === cusip);
+  if (!bond) return;
+
+  const mmddSettle = toIsoDate(localDate(bond.settlementDate)).slice(5, 10);
+  const mmddMature = bond.maturity.slice(5, 10);
+  const saS = parseFloat(rawRefCpiData.find(r => r["Ref CPI Date"].includes(`-${mmddSettle}`))?.["SA Factor"]);
+  const saM = parseFloat(rawRefCpiData.find(r => r["Ref CPI Date"].includes(`-${mmddMature}`))?.["SA Factor"]);
+  const ratio = saS / saM;
+
+  const html = `
+    <div style="background:#f8fafc;padding:12px;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Market Price</span> <strong>${bond.price.toFixed(3)}</strong></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>S-Factor (Settle ${mmddSettle})</span> <strong>${saS.toFixed(4)}</strong></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>S-Factor (Maturity ${mmddMature})</span> <strong>${saM.toFixed(4)}</strong></div>
+      <div style="border-top:1px dashed #cbd5e1;margin:8px 0;padding-top:8px;display:flex;justify-content:space-between;">
+        <span>Adjustment Ratio (S_s / S_m)</span> <strong>${ratio.toFixed(4)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;color:#1a56db;font-weight:700;">
+        <span>Adjusted Price</span> <span>${(bond.price * ratio).toFixed(3)}</span>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#64748b;">
+      <p>The <strong>SA Yield</strong> is calculated by finding the internal rate of return (IRR) of the bond using the <strong>Adjusted Price</strong> instead of the market price.</p>
+      <p>A ratio &lt; 1.0 reduces the price (increasing yield), while a ratio &gt; 1.0 increases the price (decreasing yield).</p>
+    </div>
+  `;
+  _showDrillPopup(\`SA Drill-down: \${bond.cusip} (\${fmtMMM(bond.maturity)})\`, html);
+}
+
 let rawYieldsData = null;
 let rawRefCpiData = null;
 let rawHolidayData = null;
@@ -307,6 +385,7 @@ function fmtMMM(dateStr) {
 }
 
 function renderTable(bonds) {
+  window._currentBonds = bonds; // Store for drill-down access
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = bonds.map(b => `
     <tr>
@@ -315,12 +394,25 @@ function renderTable(bonds) {
       <td>${(b.coupon * 100).toFixed(3)}%</td>
       <td>${b.price.toFixed(3)}</td>
       <td>${(b.askYield * 100).toFixed(3)}%</td>
-      <td>${(b.saYield * 100).toFixed(3)}%</td>
-      <td style="font-weight:700; color:#1a56db;">${(b.saoYield * 100).toFixed(3)}%</td>
+      <td class="drillable" data-cusip="${b.cusip}">${(b.saYield * 100).toFixed(3)}%</td>
+      <td style="font-weight:700; color:#1a56db;" class="drillable" data-cusip="${b.cusip}">${(b.saoYield * 100).toFixed(3)}%</td>
       <td class="${b.diffBps >= 0 ? 'pos' : 'neg'}">${b.diffBps.toFixed(1)}</td>
     </tr>
   `).join('');
 }
+
+// ─── Table and Info Click Handlers ──────────────────────────────────────────
+document.getElementById('tableBody').addEventListener('click', (e) => {
+  const td = e.target.closest('td.drillable');
+  if (!td) return;
+  _showSaDrill(td.dataset.cusip);
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'why-adjust-link') {
+    _showIntuitionGuide();
+  }
+});
 
 let chart = null;
 function renderChart(bonds) {
@@ -462,11 +554,15 @@ function renderChart(bonds) {
           }
         },
         tooltip: {
-          backgroundColor: 'rgba(30, 41, 59, 0.8)',
-          padding: 6,
-          titleFont: { size: 11 },
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          titleColor: '#1e293b',
+          bodyColor: '#475569',
+          borderColor: '#e2e8f0',
+          borderWidth: 1,
+          padding: 8,
+          titleFont: { size: 11, weight: '700' },
           bodyFont: { size: 11 },
-          cornerRadius: 4,
+          cornerRadius: 6,
           displayColors: false,
           callbacks: {
             title: (items) => {

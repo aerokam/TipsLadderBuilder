@@ -47,6 +47,12 @@
   .pos { color: #16a34a; font-weight: 600; } 
   .neg { color: #dc2626; font-weight: 600; }
 
+  /* ── Drillable & Info ── */
+  .info-link { color: #1a56db; text-decoration: none; cursor: pointer; border-bottom: 1px dotted #1a56db; font-size: 11px; margin-left: 4px; vertical-align: middle; }
+  .info-link:hover { color: #1748c0; }
+  .drillable { cursor: pointer; text-decoration: underline dotted #94a3b8; }
+  .drillable:hover { background: #fef9c3 !important; }
+
   #info-strip { font-size: 12px; color: #64748b; margin-bottom: 8px; }
   
   footer { font-size: 11px; color: #94a3b8; padding: 8px 0; display: flex; justify-content: center; gap: 20px; flex-shrink: 0; }
@@ -109,7 +115,7 @@
                 <th>Coupon</th>
                 <th>Price</th>
                 <th>Ask Yield</th>
-                <th>SA Yield</th>
+                <th>SA Yield <span class="info-link" id="why-adjust-link">WHY?</span></th>
                 <th>SAO Yield</th>
                 <th>Diff (bps)</th>
               </tr>

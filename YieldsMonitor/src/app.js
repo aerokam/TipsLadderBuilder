@@ -227,10 +227,14 @@ function createChartInstance(sym) {
           pan: { enabled: true, mode: 'xy' }
         },
         tooltip: {
-          backgroundColor: 'rgba(30, 41, 59, 0.8)',
-          padding: 6,
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          titleColor: '#1e293b',
+          bodyColor: '#475569',
+          borderColor: '#e2e8f0',
+          borderWidth: 1,
+          padding: 8,
           bodyFont: { size: 10 },
-          cornerRadius: 4,
+          cornerRadius: 6,
           displayColors: false,
           callbacks: { label: ctx => `${sym}: ${ctx.parsed.y.toFixed(3)}%` }
         }
