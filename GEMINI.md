@@ -1,4 +1,4 @@
-# TIPS Portal Monorepo
+# Treasury Investors Portal Monorepo
 
 This repository contains multiple projects for Treasury Inflation-Protected Securities (TIPS) analysis and planning.
 

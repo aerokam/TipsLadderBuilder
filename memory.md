@@ -1,4 +1,4 @@
-# TIPS Portal — Project Memory
+# Treasury Investors Portal — Project Memory
 
 ## Core Philosophy
 - **Understandability Reward**: Every logic or UI change should increase the clarity of information. Opacity is a bug.

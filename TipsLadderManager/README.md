@@ -52,6 +52,17 @@ Prices are fetched from FedInvest once daily by GitHub Actions and uploaded to C
 
 ---
 
+## Technical Documentation & Glossary
+
+This project is built on **spec-first development**. All logic and formulas are documented in the following knowledge-base files:
+
+- **[Master Glossary](../shared/knowledge/GLOSSARY.md)**: Authoritative source for all financial terms, mathematical formulas, and project-specific terminology.
+- **[Bond Basics](../shared/knowledge/1.0_Bond_Basics.md)**: Fundamental concepts for nominal Treasuries.
+- **[TIPS Basics](../shared/knowledge/2.1_TIPS_Basics.md)**: Detailed interpolation logic and inflation-adjustment rules.
+- **[TIPS Ladder Rebalancing](./knowledge/4.0_TIPS_Ladder_Rebalancing.md)**: The core algorithm for rebalancing existing holdings.
+
+---
+
 ## Running Locally
 
 No build step required — open `TipsLadderManager/index.html` in a browser, or serve the project root with any static file server:
