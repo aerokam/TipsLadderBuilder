@@ -94,7 +94,7 @@ High-level terms used for designing and rebalancing TIPS ladders.
 
 ### DAA
 **Full name:** Desired Annual Amount
-**Definition:** Target total nominal cash flow for a funded year (includes both maturing principal and interest payments).
+**Synonym for:** DARA
 
 ### AA
 **Full name:** Annual Amount
