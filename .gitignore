@@ -16,3 +16,6 @@ lerna-debug.log*
 
 YieldsMonitor/data/yield-history/
 
+Yields/FidelityTreasuries.csv
+Yields/FidelityTips.csv
+

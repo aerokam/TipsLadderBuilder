@@ -58,24 +58,50 @@
   footer { font-size: 11px; color: #94a3b8; padding: 8px 0; display: flex; justify-content: center; gap: 20px; flex-shrink: 0; }
 
   /* ── Tabs ── */
-  #tab-bar { display: flex; border-bottom: 2px solid #1a56db; margin-bottom: 8px; }
-  .tab-btn { padding: 6px 22px; font-size: 13px; font-weight: 700; border: 2px solid #1a56db; border-bottom: none; border-radius: 6px 6px 0 0; background: #dbeafe; color: #1a56db; cursor: pointer; margin-right: 4px; position: relative; bottom: -2px; }
-  .tab-btn.active { background: #fff; color: #1a56db; border-bottom: 2px solid #fff; z-index: 1; }
-  .tab-btn:not(.active):hover { background: #bfdbfe; }
+  #tab-bar { display: flex; background: #e2e8f0; padding: 8px 12px 0; border-bottom: 1px solid #cbd5e1; gap: 4px; }
+  .tab-btn { 
+    padding: 8px 24px; 
+    font-size: 13px; 
+    font-weight: 600; 
+    border: 1px solid transparent; 
+    border-bottom: none; 
+    border-radius: 8px 8px 0 0; 
+    background: #cbd5e1; 
+    color: #475569; 
+    cursor: pointer; 
+    position: relative; 
+    bottom: -1px;
+    transition: all 0.2s;
+  }
+  .tab-btn.active { 
+    background: #fff; 
+    color: #1a56db; 
+    border-color: #cbd5e1; 
+    border-top: 3px solid #1a56db;
+    z-index: 1; 
+    box-shadow: 0 -2px 4px rgba(0,0,0,0.05);
+    padding-top: 6px; /* Adjust for the thicker top border */
+  }
+  .tab-btn:not(.active):hover { background: #b9c6d6; }
 
-  /* ── Date range inputs ── */
-  .date-inp-wrap { display:inline-flex; align-items:center; }
-  .date-inp-wrap input[type="text"] { font-size:11px; padding:2px 4px; border:1px solid #cbd5e1; border-radius:4px 0 0 4px; border-right:none; background:#fff; width:84px; font-variant-numeric:tabular-nums; }
-  .date-inp-wrap input[type="text"].invalid { border-color:#f87171; background:#fff5f5; }
-  .date-inp-wrap input[type="date"] { position:absolute; opacity:0; pointer-events:none; width:0; height:0; }
-  .cal-btn { padding:1px 5px; font-size:11px; border:1px solid #cbd5e1; border-radius:0 4px 4px 0; background:#f8fafc; cursor:pointer; color:#64748b; line-height:1.6; }
-  .cal-btn:hover { background:#e2e8f0; }
+  /* ── Source Row ── */
+  #sourceRow { display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap: wrap; }
+  .source-card { background:#fff; border:1px solid #ddd; border-radius:6px; padding: 4px 10px; display:flex; align-items:center; gap:8px; }
+  .source-label { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; }
+  .source-checkboxes { display:flex; align-items:center; gap:12px; font-size:12px; border:1px solid #ddd; background:#fff; padding:4px 10px; border-radius:6px; }
+  .source-checkboxes label { display:flex; align-items:center; gap:4px; cursor:pointer; }
+  .source-date { font-size:10px; color:#94a3b8; margin-left:2px; }
 
-  /* ── Sortable columns ── */
-  table.main th[data-sort] { cursor: pointer; user-select: none; }
-  table.main th[data-sort]:hover { background: #2d3f55; }
-  table.main th.sort-asc::after { content: ' ▲'; font-size: 9px; }
-  table.main th.sort-desc::after { content: ' ▼'; font-size: 9px; }
+  /* ── Date Input Styles ── */
+  .date-inp-wrap { display: flex; align-items: center; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0 4px; position: relative; }
+  .date-inp-wrap input[type="text"] { border: none; font-size: 11px; width: 75px; padding: 4px; outline: none; background: transparent; }
+  .date-inp-wrap input[type="date"] { position: absolute; visibility: hidden; width: 0; height: 0; }
+  .cal-btn { background: none; border: none; cursor: pointer; padding: 2px; font-size: 14px; color: #64748b; line-height: 1; }
+  .cal-btn:hover { color: #1a56db; }
+  input.invalid { color: #dc2626; background: #fef2f2; }
+
+  .reset-btn { padding: 4px 10px; font-size: 11px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; cursor:pointer; }
+  .reset-btn:hover { background: #e2e8f0; color: #1e293b; }
 </style>
 </head>
 <body>
@@ -87,25 +113,34 @@
     </div>
     <div id="status">Loading data...</div>
     
-    <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap: wrap;">
-      <div id="brokerFileRow" style="background:#fff; border:1px solid #ddd; border-radius:6px; padding: 4px 10px; display:flex; align-items:center; gap:8px;">
-        <label style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">Load Broker CSV:</label>
-        <input type="file" id="brokerFile" accept=".csv" style="font-size:11px;">
+    <div id="sourceRow">
+      <!-- TIPS Source UI -->
+      <div id="tipsSourceUI" style="display:flex; gap:12px; align-items:center;">
+        <div class="source-card">
+          <label class="source-label">Load Broker CSV:</label>
+          <input type="file" id="brokerFile" accept=".csv" style="font-size:11px;">
+        </div>
+        <div id="tipsCheckboxes" class="source-checkboxes">
+          <label><input type="checkbox" id="chkTipsFed" checked> FedInvest<span id="tipsFedDateLabel" class="source-date"></span></label>
+          <label><input type="checkbox" id="chkTipsBroker" disabled> Broker<span id="tipsBrokerDateLabel" class="source-date"></span></label>
+        </div>
+        <button id="resetTips" class="reset-btn" style="display:none;">Reset</button>
       </div>
-      <div id="priceSource" style="font-size:12px; display:none; align-items:center; gap:10px;">
-        <span id="priceSourceLabel" style="color:#1a56db; font-weight:600;"></span>
-        <button id="resetFedInvest" style="padding: 2px 8px; font-size: 10px; background:#fff; color:#1a56db; border:1px solid #1a56db; border-radius:4px; cursor:pointer; font-weight:600;">RESET TO FEDINVEST</button>
+
+      <!-- Treasuries Source UI -->
+      <div id="treasuriesSourceUI" style="display:none; gap:12px; align-items:center;">
+        <div class="source-card">
+          <label class="source-label">Load Fidelity CSV:</label>
+          <input type="file" id="fidelityNominalsFile" accept=".csv" style="font-size:11px;">
+        </div>
+        <div class="source-checkboxes">
+          <label><input type="checkbox" id="chkFedInvest" checked> FedInvest<span id="fedInvestDateLabel" class="source-date"></span></label>
+          <label><input type="checkbox" id="chkFidelity" disabled> Fidelity<span id="fidelityDateLabel" class="source-date"></span></label>
+        </div>
+        <button id="resetTreasuries" class="reset-btn" style="display:none;">Reset</button>
       </div>
-      <div id="brokerFileRowNominals" style="background:#fff; border:1px solid #ddd; border-radius:6px; padding:4px 10px; display:none; align-items:center; gap:8px;">
-        <label style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">Load Fidelity CSV:</label>
-        <input type="file" id="fidelityNominalsFile" accept=".csv" style="font-size:11px;">
-      </div>
-      <div id="nominalsSourceRow" style="display:none; align-items:center; gap:10px; font-size:12px;">
-        <span style="font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase;">Sources:</span>
-        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="chkFedInvest" checked> FedInvest<span id="fedInvestDateLabel" style="font-size:10px; color:#94a3b8; margin-left:2px;"></span></label>
-        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="chkFidelity" disabled> Fidelity<span id="fidelityDateLabel" style="font-size:10px; color:#94a3b8; margin-left:2px;"></span></label>
-      </div>
-      <div id="info-strip" style="margin-bottom:0; margin-left: auto;"></div>
+
+      <div id="info-strip" style="margin-bottom:0; margin-left: auto; font-size: 12px; color: #64748b;"></div>
     </div>
   </header>
 
@@ -147,13 +182,25 @@
 
     <div id="pane-bottom">
       <div class="card">
+        <div id="tipsControls" style="display:flex; padding:6px 14px; border-bottom:1px solid #e2e8f0; background:#f8fafc; flex-shrink:0; gap:18px; align-items:center; font-size:12px;">
+          <span style="font-weight:700; color:#475569; text-transform:uppercase; font-size:10px;">Show:</span>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="showTipsAsk" checked> Ask</label>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="showTipsSa" checked> SA</label>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="showTipsSao" checked> SAO</label>
+          <span style="color:#cbd5e1; margin: 0 4px;">|</span>
+          <a href="#" id="tipsShowAll" style="color:#1a56db; text-decoration:none; font-weight:600; font-size:11px;">All</a>
+          <a href="#" id="tipsShowNone" style="color:#1a56db; text-decoration:none; font-weight:600; font-size:11px;">None</a>
+        </div>
         <div id="nominalsControls" style="display:none; padding:6px 14px; border-bottom:1px solid #e2e8f0; background:#f8fafc; flex-shrink:0; gap:18px; align-items:center; font-size:12px;">
           <span style="font-weight:700; color:#475569; text-transform:uppercase; font-size:10px;">Show:</span>
           <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="filterBills" checked> Bills</label>
           <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="filterNotes" checked> Notes</label>
           <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="filterBonds" checked> Bonds</label>
           <span style="color:#cbd5e1; margin: 0 4px;">|</span>
-          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="filterStrips"> STRIPS</label>
+          <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="filterStrips"> STRIPS <span style="font-size:9px; color:#94a3b8; font-weight:normal;">(Fidelity Only)</span></label>
+          <span style="color:#cbd5e1; margin: 0 4px;">|</span>
+          <a href="#" id="nominalsShowAll" style="color:#1a56db; text-decoration:none; font-weight:600; font-size:11px;">All</a>
+          <a href="#" id="nominalsShowNone" style="color:#1a56db; text-decoration:none; font-weight:600; font-size:11px;">None</a>
         </div>
         <div class="table-scroll-wrap">
           <table class="main" id="saTable">

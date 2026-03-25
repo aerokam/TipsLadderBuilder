@@ -415,17 +415,25 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
+  
+  // Show/Hide Source UI groups
+  document.getElementById('tipsSourceUI').style.display = tab === 'tips' ? 'flex' : 'none';
+  document.getElementById('treasuriesSourceUI').style.display = tab === 'treasuries' ? 'flex' : 'none';
+
+  // Table visibility
   document.getElementById('saTable').style.display = tab === 'tips' ? '' : 'none';
   document.getElementById('nominalsTable').style.display = tab === 'treasuries' ? '' : 'none';
-  document.getElementById('brokerFileRow').style.display = tab === 'tips' ? '' : 'none';
-  document.getElementById('brokerFileRowNominals').style.display = tab === 'treasuries' ? 'flex' : 'none';
-  document.getElementById('nominalsSourceRow').style.display = (tab === 'treasuries' && fidelityNominalsData) ? 'flex' : 'none';
-  const ctrl = document.getElementById('nominalsControls');
-  ctrl.style.display = tab === 'treasuries' ? 'flex' : 'none';
+  
+  // Controls visibility
+  document.getElementById('tipsControls').style.display = tab === 'tips' ? 'flex' : 'none';
+  document.getElementById('nominalsControls').style.display = tab === 'treasuries' ? 'flex' : 'none';
+  
+  // Reset date range logic (optional, but keep consistent with previous behavior)
   document.getElementById('startMaturity').value = '';
   document.getElementById('endMaturity').value = '';
   document.getElementById('startMaturityCal').value = '';
   document.getElementById('endMaturityCal').value = '';
+  
   processAndRender();
 }
 
@@ -437,26 +445,46 @@ function parseFidelityNominals(text) {
   const rows = parseCsv(text);
   const bonds = [];
   const seen = new Set();
+  
+  // Create lookup for valid nominal CUSIPs from our FedInvest data
+  const validNominalCusips = new Set(rawNominalsData.map(r => r.cusip));
+
   for (const row of rows) {
     const n = {};
     for (const k in row) n[k.toLowerCase().trim()] = row[k];
     const cusip   = clean(n['cusip']);
     const desc    = (n['description'] || '').toUpperCase();
+    
+    if (!cusip || seen.has(cusip)) continue;
+    
+    // Explicitly reject if it's a known TIPS CUSIP or described as such
+    if (rawYieldsData.some(r => r.cusip === cusip) || /\bTIPS\b/.test(desc)) {
+      continue;
+    }
+
+    // Only accept if it's a known nominal Treasury CUSIP or a recognized STRIP
+    const isActuallyStrip = isStrip(cusip);
+    if (!validNominalCusips.has(cusip) && !isActuallyStrip) {
+      continue;
+    }
+
     const matStr  = clean(n['maturity date']);        // MM/DD/YYYY
     const yldStr  = clean(n['ask yield to maturity']);
     const couponStr = clean(n['coupon']);
     const priceStr  = clean(n['price ask']);
-    if (!cusip || !matStr || seen.has(cusip)) continue;
-    if (/\bTIPS\b/.test(desc)) continue;
+    if (!matStr) continue;
     const [mo, dy, yr] = matStr.split('/');
     if (!yr) continue;
     const maturity = `${yr}-${mo.padStart(2,'0')}-${dy.padStart(2,'0')}`;
     const maturityDate = localDate(maturity);
     const yld = parseFloat(yldStr) / 100;
     if (!maturityDate || isNaN(yld)) continue;
-    const type = /BILL/.test(desc) ? 'MARKET BASED BILL'
-               : /\bNOTE\b/.test(desc) ? 'MARKET BASED NOTE'
-               : 'MARKET BASED BOND';
+    
+    let type = /BILL/.test(desc) ? 'MARKET BASED BILL'
+             : /\bNOTE\b/.test(desc) ? 'MARKET BASED NOTE'
+             : 'MARKET BASED BOND';
+    if (isActuallyStrip) type = 'MARKET BASED STRIP';
+
     seen.add(cusip);
     bonds.push({ cusip, type, coupon: parseFloat(couponStr) || 0, price: parseFloat(priceStr.replace(/,/g,'')) || NaN, yield: yld, maturity, maturityDate });
   }
@@ -475,7 +503,7 @@ function processAndRenderNominals() {
     let fedProcessed = null;
     if (showFed) {
       if (!rawNominalsData || rawNominalsData.length === 0) { statusEl.textContent = 'No FedInvest data available.'; return; }
-      fedProcessed = rawNominalsData.filter(r => nominalsTypeFilters.has(r.type)).map(r => {
+      fedProcessed = rawNominalsData.filter(r => nominalsTypeFilters.has(r.type) || (nominalsShowStrips && isStrip(r.cusip))).map(r => {
         const price = parseFloat(r.price);
         const coupon = parseFloat(r.coupon);
         const maturityDate = localDate(r.maturity);
@@ -487,10 +515,10 @@ function processAndRenderNominals() {
 
     let fidProcessed = null;
     if (showFid) {
-      fidProcessed = fidelityNominalsData.filter(r => nominalsTypeFilters.has(r.type));
+      fidProcessed = fidelityNominalsData.filter(r => nominalsTypeFilters.has(r.type) || (nominalsShowStrips && isStrip(r.cusip)));
     }
 
-    // Filter STRIPS unless user opts in
+    // Filter STRIPS unless user opts in (already handled by the initial filter above for performance, but we keep the fidProcessed part consistent)
     if (!nominalsShowStrips) {
       if (fedProcessed) fedProcessed = fedProcessed.filter(b => !isStrip(b.cusip));
       if (fidProcessed) fidProcessed = fidProcessed.filter(b => !isStrip(b.cusip));
@@ -537,7 +565,7 @@ function renderNominalsTable(fedBonds, fidBonds) {
   const theadRow = document.querySelector('#nominalsTable thead tr');
   const tbody = document.getElementById('nominalsTableBody');
   const bothActive = fedBonds && fidBonds;
-  const shortType = t => t === 'MARKET BASED BILL' ? 'Bill' : t === 'MARKET BASED NOTE' ? 'Note' : 'Bond';
+  const shortType = t => t === 'MARKET BASED BILL' ? 'Bill' : t === 'MARKET BASED NOTE' ? 'Note' : t === 'MARKET BASED BOND' ? 'Bond' : 'STRIP';
   const fmtMat = s => { if (!s) return ''; const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
   const fmtYld = y => (y != null && !isNaN(y)) ? (y * 100).toFixed(3) + '%' : '—';
   const sortCls = col => nominalsSort.col === col ? ` class="sort-${nominalsSort.dir}"` : '';
@@ -549,8 +577,8 @@ function renderNominalsTable(fedBonds, fidBonds) {
       <th data-sort="cusip"${sortCls('cusip')}>CUSIP</th>
       <th>Type</th>
       <th data-sort="coupon"${sortCls('coupon')}>Coupon</th>
-      <th>FedInvest</th>
-      <th>Fidelity</th>
+      <th>Price (Fed/Fid)</th>
+      <th>Yield (Fed/Fid)</th>
       <th>Diff (bps)</th>`;
     const fedMap = new Map(fedBonds.map(b => [b.cusip, b]));
     const fidMap = new Map(fidBonds.map(b => [b.cusip, b]));
@@ -558,7 +586,7 @@ function renderNominalsTable(fedBonds, fidBonds) {
     const merged = [...new Set([...fedMap.keys(), ...fidMap.keys()])].map(cusip => {
       const fed = fedMap.get(cusip), fid = fidMap.get(cusip), ref = fed || fid;
       const diff = (fed && fid) ? Math.round((fid.yield - fed.yield) * 10000) : null;
-      return { ...ref, fedYield: fed?.yield ?? null, fidYield: fid?.yield ?? null, diff };
+      return { ...ref, fedPrice: fed?.price ?? NaN, fidPrice: fid?.price ?? NaN, fedYield: fed?.yield ?? null, fidYield: fid?.yield ?? null, diff };
     }).sort(makeCmp(getV));
     tbody.innerHTML = merged.map(b => `
       <tr>
@@ -566,8 +594,8 @@ function renderNominalsTable(fedBonds, fidBonds) {
         <td>${b.cusip}</td>
         <td>${shortType(b.type)}</td>
         <td>${((b.coupon || 0) * 100).toFixed(3)}%</td>
-        <td>${fmtYld(b.fedYield)}</td>
-        <td>${fmtYld(b.fidYield)}</td>
+        <td>${isNaN(b.fedPrice) ? '—' : b.fedPrice.toFixed(3)} / ${isNaN(b.fidPrice) ? '—' : b.fidPrice.toFixed(3)}</td>
+        <td>${fmtYld(b.fedYield)} / ${fmtYld(b.fidYield)}</td>
         <td class="${b.diff !== null ? (b.diff > 0 ? 'pos' : b.diff < 0 ? 'neg' : '') : ''}">${b.diff !== null ? (b.diff > 0 ? '+' : '') + b.diff : '—'}</td>
       </tr>`).join('');
   } else {
@@ -606,21 +634,27 @@ function renderNominalsChart(fedBonds, fidBonds) {
   if (fedBonds) {
     const sfx = bothShown ? ' (FedInvest)' : '';
     seriesDef.push(
-      { label: `Bills${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED BILL').map(toPoint), color: '#0ea5e9', r: 2, w: 1.5 },
-      { label: `Notes${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED NOTE').map(toPoint), color: '#1a56db', r: 0, w: 2.5 },
-      { label: `Bonds${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED BOND').map(toPoint), color: '#7c3aed', r: 0, w: 2.5 },
+      { label: `Bills${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED BILL' && !isStrip(b.cusip)).map(toPoint), color: '#0ea5e9', r: 2, w: 1.5 },
+      { label: `Notes${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED NOTE' && !isStrip(b.cusip)).map(toPoint), color: '#1a56db', r: 0, w: 2.5 },
+      { label: `Bonds${sfx}`,  data: fedBonds.filter(b => b.type === 'MARKET BASED BOND' && !isStrip(b.cusip)).map(toPoint), color: '#7c3aed', r: 0, w: 2.5 },
+      { label: `STRIPS${sfx}`, data: fedBonds.filter(b => isStrip(b.cusip)).map(toPoint), color: '#64748b', r: 0, w: 2.2 }
     );
   }
   if (fidBonds) {
     const sfx = bothShown ? ' (Fidelity)' : '';
     seriesDef.push(
-      { label: `Bills${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED BILL').map(toPoint), color: '#f97316', r: 2, w: 1.5 },
-      { label: `Notes${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED NOTE').map(toPoint), color: '#dc2626', r: 0, w: 2.5 },
-      { label: `Bonds${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED BOND').map(toPoint), color: '#059669', r: 0, w: 2.5 },
+      { label: `Bills${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED BILL' && !isStrip(b.cusip)).map(toPoint), color: '#f97316', r: 2, w: 1.5 },
+      { label: `Notes${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED NOTE' && !isStrip(b.cusip)).map(toPoint), color: '#dc2626', r: 0, w: 2.5 },
+      { label: `Bonds${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED BOND' && !isStrip(b.cusip)).map(toPoint), color: '#059669', r: 0, w: 2.5 },
+      { label: `STRIPS${sfx}`, data: fidBonds.filter(b => isStrip(b.cusip)).map(toPoint), color: '#78350f', r: 0, w: 2.2 }
     );
   }
 
-  const allPoints = seriesDef.flatMap(s => s.data);
+  // Filter series with no data points
+  const activeSeries = seriesDef.filter(s => s.data.length > 0);
+  const allPoints = activeSeries.flatMap(s => s.data);
+  if (allPoints.length === 0) { if (chart) { chart.destroy(); chart = null; } return; }
+
   const minDate = new Date(Math.min(...allPoints.map(d => d.x)));
   const maxDate = new Date(Math.max(...allPoints.map(d => d.x)));
   const minX = new Date(minDate.getFullYear(), minDate.getMonth(), 1).getTime();
@@ -638,7 +672,7 @@ function renderNominalsChart(fedBonds, fidBonds) {
   chart = new Chart(ctx, {
     type: 'line',
     data: {
-      datasets: seriesDef.map(s => ({
+      datasets: activeSeries.map(s => ({
         label: s.label,
         data: s.data,
         borderColor: s.color,
@@ -701,174 +735,216 @@ function renderNominalsChart(fedBonds, fidBonds) {
 }
 
 function processAndRenderTips() {
-  console.log("processAndRenderTips() started");
   const statusEl = document.getElementById('status');
-  if (!rawYieldsData || rawYieldsData.length === 0 || !rawRefCpiData) {
-    console.warn("No data to process. rawYieldsData:", rawYieldsData, "rawRefCpiData:", rawRefCpiData);
-    return;
-  }
+  const showFed = document.getElementById('chkTipsFed').checked;
+  const showBroker = document.getElementById('chkTipsBroker').checked && !!brokerPrices;
+
+  if (!showFed && !showBroker) { statusEl.textContent = 'No data source selected.'; return; }
+  if (!rawYieldsData || rawYieldsData.length === 0 || !rawRefCpiData) return;
 
   try {
     const infoEl = document.getElementById('info-strip');
-    const priceSourceEl = document.getElementById('priceSource');
-    const sourceLabelEl = document.getElementById('priceSourceLabel');
-
     const fedSettleStr = rawYieldsData[0]?.settlementDate;
-    
-    if (brokerPrices) {
-      const uploadTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      sourceLabelEl.textContent = `Using Broker Ask Prices (Uploaded at ${uploadTime})`;
-      priceSourceEl.style.display = 'flex';
-      const fedSettleDate = localDate(fedSettleStr);
-      const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
-      const displaySettle = toIsoDate(tPlus1);
-      infoEl.textContent = `Broker Prices \xb7 Settlement Date: ${displaySettle} (T+1)`;
-    } else {
-      priceSourceEl.style.display = 'none';
-      infoEl.textContent = `FedInvest market data \xb7 Settlement Date: ${fedSettleStr} (T)`;
+
+    // Build the processed set for each active source
+    const getProcessed = (sourceMap, isBroker) => {
+      return rawYieldsData.map(bond => {
+        const coupon = parseFloat(bond.coupon);
+        let price = parseFloat(bond.price);
+        let settleDateStr = bond.settlementDate;
+        
+        if (isBroker) {
+          if (!sourceMap.has(bond.cusip)) return null;
+          price = sourceMap.get(bond.cusip);
+          const fedSettleDate = localDate(bond.settlementDate);
+          const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
+          settleDateStr = toIsoDate(tPlus1);
+        }
+
+        const mmddSettle = settleDateStr.slice(5, 10);
+        const mmddMature = bond.maturity.slice(5, 10);
+        const rSettle = rawRefCpiData.find(r => r["Ref CPI Date"] && r["Ref CPI Date"].includes(`-${mmddSettle}`));
+        const rMature = rawRefCpiData.find(r => r["Ref CPI Date"] && r["Ref CPI Date"].includes(`-${mmddMature}`));
+        const saSettle = parseFloat(rSettle?.["SA Factor"]);
+        const saMature = parseFloat(rMature?.["SA Factor"]);
+
+        if (isNaN(saSettle) || isNaN(saMature)) return null;
+
+        const askYield = yieldFromPrice(price, coupon, localDate(settleDateStr), localDate(bond.maturity));
+        const saYield = yieldFromPrice(price * (saSettle / saMature), coupon, localDate(settleDateStr), localDate(bond.maturity));
+        return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity), settlementDate: settleDateStr, isBroker };
+      }).filter(Boolean).sort((a, b) => a.maturityDate - b.maturityDate);
+    };
+
+    let fedBonds = showFed ? getProcessed(null, false) : null;
+    let brokerBonds = showBroker ? getProcessed(brokerPrices, true) : null;
+
+    // Apply SAO to each set
+    if (fedBonds) {
+      const smoothed = calculateSAO(fedBonds);
+      fedBonds.forEach((b, i) => { b.saoYield = smoothed[i]; b.diffBps = (b.saYield - b.askYield) * 10000; });
     }
-
-    console.log("Processing bonds...");
-    const allProcessed = rawYieldsData.map(bond => {
-      const coupon = parseFloat(bond.coupon);
-      let price = parseFloat(bond.price);
-      let settleDateStr = bond.settlementDate;
-
-      if (brokerPrices && brokerPrices.has(bond.cusip)) {
-        price = brokerPrices.get(bond.cusip);
-        const fedSettleDate = localDate(bond.settlementDate);
-        const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
-        settleDateStr = toIsoDate(tPlus1);
-      }
-
-      const mmddSettle = settleDateStr.slice(5, 10);
-      const mmddMature = bond.maturity.slice(5, 10);
-
-      const rSettle = rawRefCpiData.find(r => r["Ref CPI Date"] && r["Ref CPI Date"].includes(`-${mmddSettle}`));
-      const rMature = rawRefCpiData.find(r => r["Ref CPI Date"] && r["Ref CPI Date"].includes(`-${mmddMature}`));
-      const saSettle = parseFloat(rSettle?.["SA Factor"]);
-      const saMature = parseFloat(rMature?.["SA Factor"]);
-
-      if (isNaN(saSettle) || isNaN(saMature)) {
-        console.warn(`Missing SA factor for bond ${bond.cusip}: settle ${mmddSettle} (${saSettle}), mature ${mmddMature} (${saMature})`);
-        return null;
-      }
-
-      const askYield = yieldFromPrice(price, coupon, localDate(settleDateStr), localDate(bond.maturity));
-      const saYield = yieldFromPrice(price * (saSettle / saMature), coupon, localDate(settleDateStr), localDate(bond.maturity));
-
-      return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity), settlementDate: settleDateStr };
-    }).filter(b => b !== null).sort((a, b) => a.maturityDate - b.maturityDate);
-
-    console.log(`Processed ${allProcessed.length} bonds.`);
-
-    const smoothed = calculateSAO(allProcessed);
-    allProcessed.forEach((b, i) => {
-      b.saoYield = smoothed[i];
-      b.diffBps = (b.saYield - b.askYield) * 10000;
-    });
+    if (brokerBonds) {
+      const smoothed = calculateSAO(brokerBonds);
+      brokerBonds.forEach((b, i) => { b.saoYield = smoothed[i]; b.diffBps = (b.saYield - b.askYield) * 10000; });
+    }
 
     const startEl = document.getElementById('startMaturity');
     const endEl = document.getElementById('endMaturity');
     const startCalEl = document.getElementById('startMaturityCal');
     const endCalEl = document.getElementById('endMaturityCal');
-    if (!startEl.value && allProcessed.length > 0) {
-      startEl.value = isoToMDY(allProcessed[0].maturity);
-      endEl.value = isoToMDY(allProcessed[allProcessed.length - 1].maturity);
-      startCalEl.value = allProcessed[0].maturity;
-      endCalEl.value = allProcessed[allProcessed.length - 1].maturity;
+
+    const allCurrent = [...(fedBonds || []), ...(brokerBonds || [])].sort((a, b) => a.maturityDate - b.maturityDate);
+    if (!startEl.value && allCurrent.length > 0) {
+      startEl.value = isoToMDY(allCurrent[0].maturity);
+      endEl.value = isoToMDY(allCurrent[allCurrent.length - 1].maturity);
+      startCalEl.value = allCurrent[0].maturity;
+      endCalEl.value = allCurrent[allCurrent.length - 1].maturity;
       setupDateInput(startEl, startCalEl, () => processAndRender());
       setupDateInput(endEl, endCalEl, () => processAndRender());
     }
 
     const startDate = parseDateInput(startEl.value) || new Date(0);
     const endDate = parseDateInput(endEl.value) || new Date(9999, 0);
-    const filteredBonds = allProcessed.filter(b => b.maturityDate >= startDate && b.maturityDate <= endDate);
+    const inRange = b => b.maturityDate >= startDate && b.maturityDate <= endDate;
+    const fedFiltered = fedBonds ? fedBonds.filter(inRange) : null;
+    const brokerFiltered = brokerBonds ? brokerBonds.filter(inRange) : null;
 
-    renderTable(filteredBonds);
-    renderChart(filteredBonds);
-    statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS.`;
+    renderTable(fedFiltered, brokerFiltered);
+    renderChart(fedFiltered, brokerFiltered);
+
+    const parts = [];
+    if (showFed) parts.push(`FedInvest ${fedSettleStr} (T)`);
+    if (showBroker) {
+      const fedSettleDate = localDate(fedSettleStr);
+      const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
+      parts.push(`Broker ${toIsoDate(tPlus1)} (T+1)`);
+    }
+    infoEl.textContent = parts.join(' \xb7 ');
+    statusEl.textContent = `Loaded ${(fedFiltered?.length || 0) + (brokerFiltered?.length || 0)} TIPS.`;
     statusEl.className = '';
   } catch (err) {
-    statusEl.textContent = `Error in processing: ${err.message}`;
+    statusEl.textContent = `Error: ${err.message}`;
     statusEl.className = 'error';
     console.error('processAndRenderTips failed:', err);
   }
 }
 
-function renderTable(bonds) {
-  window._currentBonds = bonds;
+function renderTable(fedBonds, brokerBonds) {
   const tbody = document.getElementById('tableBody');
-  tbody.innerHTML = bonds.map(b => `
-    <tr>
-      <td>${fmtMMM(b.maturity)}</td>
-      <td>${b.cusip}</td>
-      <td>${(b.coupon * 100).toFixed(3)}%</td>
-      <td>${b.price.toFixed(3)}</td>
-      <td>${(b.askYield * 100).toFixed(3)}%</td>
-      <td class="drillable" data-cusip="${b.cusip}">${(b.saYield * 100).toFixed(3)}%</td>
-      <td style="font-weight:700; color:#1a56db;" class="drillable" data-cusip="${b.cusip}">${(b.saoYield * 100).toFixed(3)}%</td>
-      <td class="${b.diffBps >= 0 ? 'pos' : 'neg'}">${b.diffBps.toFixed(1)}</td>
-    </tr>
-  `).join('');
+  const thead = document.querySelector('#saTable thead tr');
+  const both = fedBonds && brokerBonds;
+  const allBonds = [...(fedBonds || []), ...(brokerBonds || [])].sort((a, b) => a.maturityDate - b.maturityDate);
+  window._currentBonds = allBonds;
+
+  if (both) {
+    thead.innerHTML = `
+      <th><a class="col-help" href="#" data-col="maturity">Maturity</a></th>
+      <th><a class="col-help" href="#" data-col="cusip">CUSIP</a></th>
+      <th><a class="col-help" href="#" data-col="coupon">Coupon</a></th>
+      <th>Price (Fed/Fid)</th>
+      <th>Ask Yield (Fed/Fid)</th>
+      <th>SA Yield (Fed/Fid)</th>
+      <th>SAO Yield (Fed/Fid)</th>`;
+    
+    const fedMap = new Map(fedBonds.map(b => [b.cusip, b]));
+    const brokerMap = new Map(brokerBonds.map(b => [b.cusip, b]));
+    const uniqueCusips = [...new Set([...fedMap.keys(), ...brokerMap.keys()])].sort((a, b) => {
+      const ma = fedMap.get(a)?.maturityDate || brokerMap.get(a)?.maturityDate;
+      const mb = fedMap.get(b)?.maturityDate || brokerMap.get(b)?.maturityDate;
+      return ma - mb;
+    });
+    
+    tbody.innerHTML = uniqueCusips.map(cusip => {
+      const f = fedMap.get(cusip), b = brokerMap.get(cusip);
+      const ref = f || b;
+      const fmtY = y => (y != null && !isNaN(y)) ? (y * 100).toFixed(3) + '%' : '—';
+      return `
+        <tr>
+          <td>${fmtMMM(ref.maturity)}</td>
+          <td>${cusip}</td>
+          <td>${(ref.coupon * 100).toFixed(3)}%</td>
+          <td>${f ? f.price.toFixed(3) : '—'} / ${b ? b.price.toFixed(3) : '—'}</td>
+          <td>${fmtY(f?.askYield)} / ${fmtY(b?.askYield)}</td>
+          <td class="drillable" data-cusip="${cusip}">${fmtY(f?.saYield)} / ${fmtY(b?.saYield)}</td>
+          <td style="font-weight:700; color:#1a56db;" class="drillable" data-cusip="${cusip}">${fmtY(f?.saoYield)} / ${fmtY(b?.saoYield)}</td>
+        </tr>`;
+    }).join('');
+  } else {
+    thead.innerHTML = `
+      <th><a class="col-help" href="#" data-col="maturity">Maturity</a></th>
+      <th><a class="col-help" href="#" data-col="cusip">CUSIP</a></th>
+      <th><a class="col-help" href="#" data-col="coupon">Coupon</a></th>
+      <th><a class="col-help" href="#" data-col="price">Price</a></th>
+      <th><a class="col-help" href="#" data-col="ask-yield">Ask Yield</a></th>
+      <th><a class="col-help" href="#" data-col="sa-yield">SA Yield</a></th>
+      <th><a class="col-help" href="#" data-col="sao-yield">SAO Yield</a></th>
+      <th><a class="col-help" href="#" data-col="diff">Diff (bps)</a></th>`;
+    const bonds = fedBonds || brokerBonds;
+    tbody.innerHTML = bonds.map(b => `
+      <tr>
+        <td>${fmtMMM(b.maturity)}</td>
+        <td>${b.cusip}</td>
+        <td>${(b.coupon * 100).toFixed(3)}%</td>
+        <td>${b.price.toFixed(3)}</td>
+        <td>${(b.askYield * 100).toFixed(3)}%</td>
+        <td class="drillable" data-cusip="${b.cusip}">${(b.saYield * 100).toFixed(3)}%</td>
+        <td style="font-weight:700; color:#1a56db;" class="drillable" data-cusip="${b.cusip}">${(b.saoYield * 100).toFixed(3)}%</td>
+        <td class="${b.diffBps >= 0 ? 'pos' : 'neg'}">${b.diffBps.toFixed(1)}</td>
+      </tr>`).join('');
+  }
 }
 
-function renderChart(bonds) {
+function renderChart(fedBonds, brokerBonds) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
-  if (bonds.length === 0) return;
+  const allBonds = [...(fedBonds || []), ...(brokerBonds || [])];
+  if (allBonds.length === 0) { if (chart) { chart.destroy(); chart = null; } return; }
 
-  const askData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.askYield * 100).toFixed(3)) }));
-  const saData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saYield * 100).toFixed(3)) }));
-  const saoData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saoYield * 100).toFixed(3)) }));
+  const toPt = (b, key) => ({ x: b.maturityDate.getTime(), y: parseFloat((b[key] * 100).toFixed(3)) });
+  const both = fedBonds && brokerBonds;
+  const seriesDef = [];
 
-  const firstBondDate = new Date(Math.min(...askData.map(d => d.x)));
-  const lastBondDate = new Date(Math.max(...askData.map(d => d.x)));
-  const minX = new Date(firstBondDate.getFullYear(), 0, 1).getTime();
-  const maxX = new Date(lastBondDate.getFullYear() + 1, 0, 1).getTime();
+  if (fedBonds) {
+    const sfx = both ? ' (Fed)' : '';
+    seriesDef.push(
+      { label: `Ask${sfx}`, data: fedBonds.map(b => toPt(b, 'askYield')), color: '#94a3b8', style: 'rect', w: 1.5, r: 3.5 },
+      { label: `SA${sfx}`,  data: fedBonds.map(b => toPt(b, 'saYield')),  color: '#475569', style: 'crossRot', w: 1.8, r: 4 },
+      { label: `SAO${sfx}`, data: fedBonds.map(b => toPt(b, 'saoYield')), color: '#1a56db', style: 'circle', w: 2.2, r: 2.5 }
+    );
+  }
+  if (brokerBonds) {
+    const sfx = both ? ' (Broker)' : '';
+    seriesDef.push(
+      { label: `Ask${sfx}`, data: brokerBonds.map(b => toPt(b, 'askYield')), color: '#f97316', style: 'rect', w: 1.5, r: 3.5 },
+      { label: `SA${sfx}`,  data: brokerBonds.map(b => toPt(b, 'saYield')),  color: '#dc2626', style: 'crossRot', w: 1.8, r: 4 },
+      { label: `SAO${sfx}`, data: brokerBonds.map(b => toPt(b, 'saoYield')), color: '#059669', style: 'circle', w: 2.2, r: 2.5 }
+    );
+  }
 
-  const allY = [...askData, ...saData, ...saoData].map(d => d.y);
-  const minYRaw = Math.min(...allY);
-  const maxYRaw = Math.max(...allY);
-  const minY = Math.floor(minYRaw * 4) / 4;
-  const maxY = Math.ceil(maxYRaw * 4) / 4;
+  const activeSeries = seriesDef.filter(s => s.data.length > 0);
+  const allPoints = activeSeries.flatMap(s => s.data);
+  const minDate = new Date(Math.min(...allPoints.map(d => d.x)));
+  const maxDate = new Date(Math.max(...allPoints.map(d => d.x)));
+  const minX = new Date(minDate.getFullYear(), 0, 1).getTime();
+  const maxX = new Date(maxDate.getFullYear() + 1, 0, 1).getTime();
+  const allY = allPoints.map(d => d.y);
+  const minY = Math.floor(Math.min(...allY) * 4) / 4;
+  const maxY = Math.ceil(Math.max(...allY) * 4) / 4;
 
   if (chart) chart.destroy();
-
   chart = new Chart(ctx, {
     type: 'line',
     data: {
-      datasets: [
-        {
-          label: 'Ask',
-          data: askData,
-          borderColor: '#94a3b8',
-          backgroundColor: '#94a3b8',
-          borderWidth: 1.5,
-          pointRadius: 3.5, 
-          pointStyle: 'rect',
-          tension: 0.1
-        },
-        {
-          label: 'Seasonally Adjusted (SA)',
-          data: saData,
-          borderColor: '#475569',
-          backgroundColor: '#475569',
-          borderWidth: 1.8,
-          pointRadius: 4, 
-          pointStyle: 'crossRot',
-          tension: 0.1
-        },
-        {
-          label: 'SA with outlier adjustment (SAO)',
-          data: saoData,
-          borderColor: '#1a56db',
-          backgroundColor: '#1a56db',
-          borderWidth: 2.2,
-          pointRadius: 2.5,
-          pointStyle: 'circle',
-          tension: 0.1
-        }
-      ]
+      datasets: activeSeries.map(s => ({
+        label: s.label,
+        data: s.data,
+        borderColor: s.color,
+        backgroundColor: s.color,
+        borderWidth: s.w,
+        pointRadius: s.r,
+        pointStyle: s.style,
+        tension: 0.1
+      }))
     },
     options: {
       responsive: true,
@@ -876,54 +952,23 @@ function renderChart(bonds) {
       animation: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        x: { 
-          type: 'time',
-          min: minX,
-          max: maxX,
-          time: {
-            unit: 'year',
-            displayFormats: { year: 'MMM yyyy', month: 'MMM yyyy' }
-          },
-          grid: { color: 'rgba(0, 0, 0, 0.05)' },
-          ticks: { autoSkip: true, maxRotation: 0 }
-        },
-        y: { 
-          type: 'linear',
-          title: { display: true, text: 'Yield (%)' },
-          min: minY,
-          max: maxY,
-          ticks: { stepSize: 0.25, callback: (val) => val.toFixed(2) }
-        }
+        x: { type: 'time', min: minX, max: maxX, time: { unit: 'year', displayFormats: { year: 'MMM yyyy' } }, grid: { color: 'rgba(0,0,0,0.05)' } },
+        y: { type: 'linear', title: { display: true, text: 'Yield (%)' }, min: minY, max: maxY, ticks: { stepSize: 0.25, callback: (v) => v.toFixed(2) } }
       },
       plugins: {
         legend: {
           labels: { usePointStyle: true, boxWidth: 8, padding: 15, font: { size: 12, weight: '500' } },
-          onClick: (e, legendItem, legend) => {
-            Chart.defaults.plugins.legend.onClick(e, legendItem, legend);
-            rescaleToVisible(legend.chart);
-          }
+          onClick: (e, item, legend) => { Chart.defaults.plugins.legend.onClick(e, item, legend); rescaleToVisible(legend.chart); }
         },
         zoom: {
           pan: { enabled: true, mode: 'xy', onPanComplete: ({chart}) => updateDynamicTicks(chart) },
           zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy', onZoomComplete: ({chart}) => updateDynamicTicks(chart) }
         },
         tooltip: {
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          titleColor: '#1e293b',
-          bodyColor: '#475569',
-          borderColor: '#e2e8f0',
-          borderWidth: 1,
-          padding: 8,
-          titleFont: { size: 11, weight: '700' },
-          bodyFont: { size: 11 },
-          cornerRadius: 6,
-          displayColors: false,
+          backgroundColor: 'rgba(255,255,255,0.95)', titleColor: '#1e293b', bodyColor: '#475569', borderColor: '#e2e8f0', borderWidth: 1, padding: 8, cornerRadius: 6, displayColors: false,
           callbacks: {
-            title: (items) => {
-              const date = new Date(items[0].parsed.x);
-              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            },
-            label: (context) => `${context.dataset.label}: ${context.parsed.y}%`
+            title: (items) => new Date(items[0].parsed.x).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%`
           }
         }
       }
@@ -980,6 +1025,58 @@ function updateDynamicTicks(chart) {
 
 // ─── Interaction Handlers ────────────────────────────────────────────────────
 
+// TIPS 'Show' Checkboxes & Links
+['showTipsAsk', 'showTipsSa', 'showTipsSao'].forEach((id, idx) => {
+  document.getElementById(id).addEventListener('change', (e) => {
+    if (!chart || activeTab !== 'tips') return;
+    const both = document.getElementById('chkTipsFed').checked && document.getElementById('chkTipsBroker').checked;
+    
+    // Dataset indexing: if both sources are active, indices are 0-2 (Fed), 3-5 (Broker)
+    // Indices map: 0/3=Ask, 1/4=SA, 2/5=SAO
+    const indices = both ? [idx, idx + 3] : [idx];
+    indices.forEach(i => {
+      if (chart.data.datasets[i]) chart.setDatasetVisibility(i, e.target.checked);
+    });
+    chart.update('none');
+    rescaleToVisible(chart);
+  });
+});
+
+document.getElementById('tipsShowAll').onclick = (e) => {
+  e.preventDefault();
+  ['showTipsAsk', 'showTipsSa', 'showTipsSao'].forEach(id => {
+    const el = document.getElementById(id);
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+document.getElementById('tipsShowNone').onclick = (e) => {
+  e.preventDefault();
+  ['showTipsAsk', 'showTipsSa', 'showTipsSao'].forEach(id => {
+    const el = document.getElementById(id);
+    el.checked = false;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+
+// Nominals 'All/None' Links
+document.getElementById('nominalsShowAll').onclick = (e) => {
+  e.preventDefault();
+  ['filterBills', 'filterNotes', 'filterBonds'].forEach(id => {
+    const el = document.getElementById(id);
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+document.getElementById('nominalsShowNone').onclick = (e) => {
+  e.preventDefault();
+  ['filterBills', 'filterNotes', 'filterBonds'].forEach(id => {
+    const el = document.getElementById(id);
+    el.checked = false;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+
 document.getElementById('brokerFile').addEventListener('change', async (e) => {
   if (!e.target.files.length) return;
   try {
@@ -1016,6 +1113,10 @@ document.getElementById('brokerFile').addEventListener('change', async (e) => {
                  normalizedRow["price bid"] || normalizedRow["bid price"];
 
       if (cusip && priceStr && !seenCusips.has(cusip)) {
+        // Only accept if it's a known TIPS CUSIP from our FedInvest data
+        if (!rawYieldsData || !rawYieldsData.some(r => r.cusip === cusip)) {
+          return;
+        }
         const price = parseFloat(clean(priceStr).replace(/,/g, ''));
         if (!isNaN(price)) {
           priceMap.set(cusip, price);
@@ -1024,24 +1125,35 @@ document.getElementById('brokerFile').addEventListener('change', async (e) => {
       }
     });
 
-    console.log(`Broker CSV: Found ${priceMap.size} valid prices.`);
+    console.log(`Broker CSV: Found ${priceMap.size} valid TIPS prices.`);
 
     if (priceMap.size === 0) {
-      alert("No valid prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
+      alert("No valid TIPS prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
       e.target.value = '';
       return;
     }
     brokerPrices = priceMap;
-    processAndRender();
+    const chkBroker = document.getElementById('chkTipsBroker');
+    chkBroker.disabled = false;
+    chkBroker.checked = true;
+    document.getElementById('tipsBrokerDateLabel').textContent = ' (' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')';
+    document.getElementById('tipsFedDateLabel').textContent = rawYieldsData?.[0]?.settlementDate ? ` (${rawYieldsData[0].settlementDate})` : '';
+    document.getElementById('resetTips').style.display = 'block';
+    processAndRenderTips();
   } catch (err) {
     alert("Error parsing CSV: " + err.message);
   }
 });
 
-document.getElementById('resetFedInvest').onclick = () => {
+document.getElementById('resetTips').onclick = () => {
   brokerPrices = null;
   document.getElementById('brokerFile').value = '';
-  processAndRender();
+  document.getElementById('chkTipsBroker').disabled = true;
+  document.getElementById('chkTipsBroker').checked = false;
+  document.getElementById('tipsBrokerDateLabel').textContent = '';
+  document.getElementById('resetTips').style.display = 'none';
+  document.getElementById('chkTipsFed').checked = true;
+  processAndRenderTips();
 };
 
 document.getElementById('fidelityNominalsFile').addEventListener('change', async (e) => {
@@ -1061,7 +1173,7 @@ document.getElementById('fidelityNominalsFile').addEventListener('change', async
     chkFid.checked = true;
     document.getElementById('fidelityDateLabel').textContent = downloadDate ? ` (${downloadDate})` : '';
     document.getElementById('fedInvestDateLabel').textContent = rawNominalsData?.[0]?.settlementDate ? ` (${rawNominalsData[0].settlementDate})` : '';
-    document.getElementById('nominalsSourceRow').style.display = 'flex';
+    document.getElementById('resetTreasuries').style.display = 'block';
     // Reset date range so it re-initializes from the union of both sources
     document.getElementById('startMaturity').value = '';
     document.getElementById('endMaturity').value = '';
@@ -1071,8 +1183,21 @@ document.getElementById('fidelityNominalsFile').addEventListener('change', async
   }
 });
 
-['chkFedInvest', 'chkFidelity'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => processAndRenderNominals());
+document.getElementById('resetTreasuries').onclick = () => {
+  fidelityNominalsData = null;
+  fidelityNominalsDate = null;
+  document.getElementById('fidelityNominalsFile').value = '';
+  document.getElementById('chkFidelity').disabled = true;
+  document.getElementById('chkFidelity').checked = false;
+  document.getElementById('fidelityDateLabel').textContent = '';
+  document.getElementById('resetTreasuries').style.display = 'none';
+  document.getElementById('chkFedInvest').checked = true;
+  processAndRenderNominals();
+};
+
+// Unified Source Change Handlers
+['chkTipsFed', 'chkTipsBroker', 'chkFedInvest', 'chkFidelity'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => processAndRender());
 });
 
 document.getElementById('tableBody').addEventListener('click', (e) => {
