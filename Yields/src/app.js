@@ -23,6 +23,7 @@ let brokerDownloadDate = null;    // download date string from Fidelity TIPS CSV
 let fidelityNominalsData = null;  // processed bond objects from Fidelity CSV
 let fidelityNominalsDate = null;  // download date string extracted from CSV footer
 let nominalsShowStrips = false;
+let nominalsClipOutliers = true;
 let chart = null;
 let chartTab = null;
 const savedZoom = { tips: null, treasuries: null };
@@ -754,7 +755,17 @@ function renderNominalsChart(fedBonds, fidBonds) {
   const spanMonths = (maxDate.getFullYear() - minDate.getFullYear()) * 12 + (maxDate.getMonth() - minDate.getMonth());
   const timeUnit = spanMonths <= 18 ? 'month' : 'year';
   const allY = allPoints.map(d => d.y);
-  const minYRaw = Math.min(...allY), maxYRaw = Math.max(...allY);
+  let scaleY = allY;
+  if (nominalsClipOutliers && allY.length >= 4) {
+    const sorted = [...allY].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
+    const clipped = allY.filter(y => y >= lo && y <= hi);
+    if (clipped.length > 0) scaleY = clipped;
+  }
+  const minYRaw = Math.min(...scaleY), maxYRaw = Math.max(...scaleY);
   const minY = Math.floor(minYRaw * 20) / 20;
   const maxY = Math.ceil(maxYRaw * 20) / 20;
   const dataRange = maxY - minY;
@@ -1256,6 +1267,12 @@ document.getElementById('nominalsTable').querySelector('thead').addEventListener
 });
 
 document.getElementById('nominalsControls').addEventListener('change', (e) => {
+  if (e.target.id === 'clipOutliers') {
+    nominalsClipOutliers = e.target.checked;
+    savedZoom['treasuries'] = null;
+    processAndRenderNominals();
+    return;
+  }
   if (e.target.id === 'filterStrips') {
     nominalsShowStrips = e.target.checked;
     savedZoom['treasuries'] = null;
