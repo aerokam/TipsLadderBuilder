@@ -17,4 +17,5 @@ A browser-based tool for analyzing **Seasonally Adjusted (SA)** and **SA Outlier
 ## Knowledge Base
 - **[1.0 Seasonal Adjustments](./knowledge/1.0_Seasonal_Adjustments.md)**: The core multiplicative transform logic.
 - **[2.0 SAO Adjustment](./knowledge/2.0_SAO_Adjustment.md)**: Outlier smoothing and trend fitting.
+- **[2.1 SA Intuition](./knowledge/2.1_SA_Intuition.md)**: Conceptual intuition behind the SA ratio.
 - **[3.0 Visual Standards](./knowledge/3.0_Visual_Standards.md)**: Charting and UI conventions.

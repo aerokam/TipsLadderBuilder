@@ -22,6 +22,7 @@ Yields/.browser-profile/
 Yields/.chrome-profile/
 Yields/.browser-profile-patch/
 Yields/logs/
+Yields/knowledge/0.0_Data_Pipeline.md
 Yields/scripts/fidelityDownload.js
 Yields/scripts/uploadFidelityDownload.js
 Yields/scripts/testLogin.js

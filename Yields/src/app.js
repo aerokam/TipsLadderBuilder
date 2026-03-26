@@ -108,6 +108,21 @@ function isoToMDY(iso) {
   const [y, m, d] = iso.split('-');
   return `${m}/${d}/${y}`;
 }
+
+// Format a Date object → MM/DD/YYYY
+function fmtDateMDY(date) {
+  return String(date.getMonth() + 1).padStart(2, '0') + '/' +
+         String(date.getDate()).padStart(2, '0') + '/' +
+         date.getFullYear();
+}
+
+// Broker timestamp "MM/DD/YYYY HH:MM AM/PM" → "MM/DD HH:MM AM/PM" (drop year)
+function fmtBrokerTime(s) {
+  if (!s) return s;
+  const [datePart, ...rest] = s.split(' ');
+  const [m, d] = datePart.split('/');
+  return `${m}/${d} ${rest.join(' ')}`;
+}
 // Parse MM/DD/YYYY text input → Date (or null if incomplete/invalid)
 function parseDateInput(s) {
   const digits = (s || '').replace(/\D/g, '');
@@ -136,9 +151,7 @@ function setupDateInput(textEl, calEl, onChange) {
 
 function fmtMMM(dateStr) {
   if (!dateStr) return "";
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  return isoToMDY(dateStr);
 }
 
 // ─── Lightweight Popup Logic ──────────────────────────────────────────────────
@@ -368,7 +381,7 @@ async function init() {
         const chkFid = document.getElementById('chkFidelity');
         chkFid.disabled = false;
         chkFid.checked = true;
-        document.getElementById('fidelityDateLabel').textContent = downloadDate ? ` (${downloadDate} ${'ET'})` : '';
+        document.getElementById('fidelityDateLabel').textContent = downloadDate ? ` (${fmtBrokerTime(downloadDate)} ET)` : '';
         console.log(`Loaded ${bonds.length} Fidelity Treasuries (${downloadDate})`);
       }
     } else {
@@ -400,7 +413,7 @@ async function init() {
         const chkBroker = document.getElementById('chkTipsBroker');
         chkBroker.disabled = false;
         chkBroker.checked = true;
-        document.getElementById('tipsBrokerDateLabel').textContent = downloadDate ? ` (${downloadDate} ${'ET'})` : '';
+        document.getElementById('tipsBrokerDateLabel').textContent = downloadDate ? ` (${fmtBrokerTime(downloadDate)} ET)` : '';
         console.log(`Loaded ${priceMap.size} Fidelity TIPS prices (${downloadDate})`);
       }
     } else {
@@ -609,12 +622,11 @@ function processAndRenderNominals() {
 
     const infoEl = document.getElementById('info-strip');
     const parts = [];
-    if (showFed) parts.push(`FedInvest settle ${rawNominalsData[0]?.settlementDate} (T)`);
+    if (showFed) parts.push(`FedInvest settle ${isoToMDY(rawNominalsData[0]?.settlementDate)} (T)`);
     if (showFid && fidelityNominalsDate) {
       const loadDate = parseFidelityDateStr(fidelityNominalsDate);
       const t1 = nextBusinessDay(loadDate, holidaySet);
-      const [datePart] = fidelityNominalsDate.split(' ');
-      parts.push(`Fidelity loaded ${datePart} · settle ${toIsoDate(t1)} (T+1)`);
+      parts.push(`Market ${fmtBrokerTime(fidelityNominalsDate)} ET · settle ${isoToMDY(toIsoDate(t1))} (T+1)`);
     }
     infoEl.textContent = parts.join(' \xb7 ');
     statusEl.textContent = `Loaded ${(fedFiltered?.length || 0) + (fidFiltered?.length || 0)} securities.`;
@@ -631,7 +643,7 @@ function renderNominalsTable(fedBonds, fidBonds) {
   const tbody = document.getElementById('nominalsTableBody');
   const bothActive = fedBonds && fidBonds;
   const shortType = t => t === 'MARKET BASED BILL' ? 'Bill' : t === 'MARKET BASED NOTE' ? 'Note' : t === 'MARKET BASED BOND' ? 'Bond' : 'STRIP';
-  const fmtMat = s => { if (!s) return ''; const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+  const fmtMat = s => isoToMDY(s);
   const fmtYld = y => (y != null && !isNaN(y)) ? (y * 100).toFixed(3) + '%' : '—';
   const sortCls = col => nominalsSort.col === col ? ` class="sort-${nominalsSort.dir}"` : '';
   const makeCmp = getV => (a, b) => { const va = getV(a), vb = getV(b); return (va < vb ? -1 : va > vb ? 1 : 0) * (nominalsSort.dir === 'asc' ? 1 : -1); };
@@ -642,8 +654,8 @@ function renderNominalsTable(fedBonds, fidBonds) {
       <th data-sort="cusip"${sortCls('cusip')}>CUSIP</th>
       <th>Type</th>
       <th data-sort="coupon"${sortCls('coupon')}>Coupon</th>
-      <th>Price (Fed/Fid)</th>
-      <th>Yield (Fed/Fid)</th>
+      <th>Price (Fed/Mkt)</th>
+      <th>Yield (Fed/Mkt)</th>
 `;
     const fedMap = new Map(fedBonds.map(b => [b.cusip, b]));
     const fidMap = new Map(fidBonds.map(b => [b.cusip, b]));
@@ -704,7 +716,7 @@ function renderNominalsChart(fedBonds, fidBonds) {
     );
   }
   if (fidBonds) {
-    const sfx = bothShown ? ' (Fidelity)' : '';
+    const sfx = bothShown ? ' (Market)' : '';
     seriesDef.push(
       { label: `Bills${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED BILL' && !isStrip(b.cusip)).map(toPoint), color: '#f97316', r: 2, w: 1.5 },
       { label: `Notes${sfx}`,  data: fidBonds.filter(b => b.type === 'MARKET BASED NOTE' && !isStrip(b.cusip)).map(toPoint), color: '#dc2626', r: 0, w: 2.5 },
@@ -781,7 +793,7 @@ function renderNominalsChart(fedBonds, fidBonds) {
           titleFont: { size: 11, weight: '700' }, bodyFont: { size: 11 },
           cornerRadius: 6, displayColors: false,
           callbacks: {
-            title: (items) => new Date(items[0].parsed.x).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            title: (items) => fmtDateMDY(new Date(items[0].parsed.x)),
             label: (context) => `${context.dataset.label}: ${context.parsed.y.toFixed(3)}%`
           }
         }
@@ -877,12 +889,12 @@ function processAndRenderTips() {
     renderChart(fedFiltered, brokerFiltered);
 
     const parts = [];
-    if (showFed) parts.push(`FedInvest settle ${fedSettleStr} (T)`);
+    if (showFed) parts.push(`FedInvest settle ${isoToMDY(fedSettleStr)} (T)`);
     if (showBroker) {
       const loadDate = brokerDownloadDate ? parseFidelityDateStr(brokerDownloadDate) : localDate(fedSettleStr);
       const t1 = nextBusinessDay(loadDate, holidaySet);
-      const datePart = brokerDownloadDate ? brokerDownloadDate.split(' ')[0] : fedSettleStr;
-      parts.push(`Fidelity loaded ${datePart} · settle ${toIsoDate(t1)} (T+1)`);
+      const timeStr = brokerDownloadDate ? fmtBrokerTime(brokerDownloadDate) : isoToMDY(fedSettleStr);
+      parts.push(`Market ${timeStr} ET · settle ${isoToMDY(toIsoDate(t1))} (T+1)`);
     }
     infoEl.textContent = parts.join(' \xb7 ');
     statusEl.textContent = `Loaded ${(fedFiltered?.length || 0) + (brokerFiltered?.length || 0)} TIPS.`;
@@ -906,10 +918,10 @@ function renderTable(fedBonds, brokerBonds) {
       <th><a class="col-help" href="#" data-col="maturity">Maturity</a></th>
       <th><a class="col-help" href="#" data-col="cusip">CUSIP</a></th>
       <th><a class="col-help" href="#" data-col="coupon">Coupon</a></th>
-      <th>Price (Fed/Fid)</th>
-      <th>Ask Yield (Fed/Fid)</th>
-      <th>SA Yield (Fed/Fid)</th>
-      <th>SAO Yield (Fed/Fid)</th>`;
+      <th>Price (Fed/Mkt)</th>
+      <th>Ask Yield (Fed/Mkt)</th>
+      <th>SA Yield (Fed/Mkt)</th>
+      <th>SAO Yield (Fed/Mkt)</th>`;
     
     const fedMap = new Map(fedBonds.map(b => [b.cusip, b]));
     const brokerMap = new Map(brokerBonds.map(b => [b.cusip, b]));
@@ -977,7 +989,7 @@ function renderChart(fedBonds, brokerBonds) {
     );
   }
   if (brokerBonds) {
-    const sfx = both ? ' (Fidelity)' : '';
+    const sfx = both ? ' (Market)' : '';
     seriesDef.push(
       { label: `Ask${sfx}`, data: brokerBonds.map(b => toPt(b, 'askYield')), color: '#f97316', style: 'rect', w: 1.5, r: 3.5 },
       { label: `SA${sfx}`,  data: brokerBonds.map(b => toPt(b, 'saYield')),  color: '#dc2626', style: 'crossRot', w: 1.8, r: 4 },
@@ -1031,7 +1043,7 @@ function renderChart(fedBonds, brokerBonds) {
         tooltip: {
           backgroundColor: 'rgba(255,255,255,0.95)', titleColor: '#1e293b', bodyColor: '#475569', borderColor: '#e2e8f0', borderWidth: 1, padding: 8, cornerRadius: 6, displayColors: false,
           callbacks: {
-            title: (items) => new Date(items[0].parsed.x).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            title: (items) => fmtDateMDY(new Date(items[0].parsed.x)),
             label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%`
           }
         }
