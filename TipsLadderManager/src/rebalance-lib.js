@@ -508,7 +508,14 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
     let tFundedYearQty, postQ;
     if (isBracket || isRebal) {
       const yearDara = year > lastYear ? 0 : (daraByYear?.get(year) ?? DARA);
-      const needed = yearDara - rebuildLaterMatInt;
+      // Bracket years use before-state LMI so funded-year qty stays unchanged (spec §Phase 4, §Named Quantities).
+      // Using rebuildLaterMatInt would let newly-bought bracket bonds reduce earlier bracket targets, causing spurious sells.
+      let lmiForYear = rebuildLaterMatInt;
+      if (isBracket) {
+        lmiForYear = 0;
+        for (const y in araLaterMaturityInterestByYear) { if (parseInt(y) > year) lmiForYear += araLaterMaturityInterestByYear[y]; }
+      }
+      const needed = yearDara - lmiForYear;
       if (isFullMode) {
         const sortedH = [...yi.holdings].sort((a, b) => b.maturity - a.maturity);
         const nonTarget = sortedH.filter(h => h.cusip !== targetCUSIP);
@@ -533,7 +540,12 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
         for (const h of nonTarget) ntPI += h.qty * piMap[h.cusip];
         tFundedYearQty = Math.max(0, Math.round((needed - ntPI) / piMap[targetCUSIP]));
       }
-      postQ = isBracket ? tFundedYearQty + Math.max(0, Math.round((bracketExcessTargetCost[year] || 0) / costPerBond)) : tFundedYearQty;
+      // For 3-bracket orig lower: preserve excess exactly by deriving qty directly (avoids real/nominal cost mismatch).
+      // bracketExcessTargetCost[origLower] = excessQtyBefore × realCost, but costPerBond is nominal; dividing would under-count by ir.
+      const excessQtyTarget = (is3Bracket && year === brackets.lowerYear)
+        ? Math.max(0, targetCurrentQty - tFundedYearQty)
+        : Math.max(0, Math.round((bracketExcessTargetCost[year] || 0) / costPerBond));
+      postQ = isBracket ? tFundedYearQty + excessQtyTarget : tFundedYearQty;
       buySellTargets[year] = { targetCUSIP, targetFundedYearQty: tFundedYearQty, targetQty: postQ, postRebalQty: postQ, qtyDelta: postQ - targetCurrentQty, targetCost: tFundedYearQty * costPerBond, costDelta: -((postQ - targetCurrentQty) * costPerBond), costPerBond, isBracket };
     } else if (year > lastYear && year <= derivedLastYear && yi.holdings.length > 0) {
       // Year was contiguous with original ladder but is now above lastYearOverride — sell all
