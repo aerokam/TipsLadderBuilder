@@ -1,5 +1,5 @@
 // Treasury Yields Monitor - app.js
-import { handleChartKeydown } from '../../shared/src/chart-keys.js';
+import { handleChartKeydown, setupAxisWheelZoom } from '../../shared/src/chart-keys.js';
 
 const AVAILABLE_SYMBOLS = {
   // TIPS
@@ -100,15 +100,15 @@ function setupUI() {
       .range-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 20px; }
       .range-btn { flex: 1; min-width: 45px; padding: 6px 0; border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 11px; color: #000; }
       .range-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; }
-      .sym-group h4 { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; font-size: 10px; text-transform: uppercase; color: #000; font-weight: 800; letter-spacing: 0.05em; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px; }
+      .sym-group h4 { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 6px; font-size: 11px; text-transform: uppercase; color: #000; font-weight: 800; letter-spacing: 0.05em; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px; }
       .clear-btn { font-size: 9px; color: #64748b; cursor: pointer; text-transform: none; font-weight: 600; }
       .clear-btn:hover { color: #0f172a; text-decoration: underline; }
-      .sym-item-check { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; cursor: pointer; color: #000; }
+      .sym-item-check { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 13px; cursor: pointer; color: #000; }
       .sym-item-check input { margin: 0; }
       .color-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-      .sym-code { font-weight: 800; color: #000; width: 65px; flex-shrink: 0; }
-      .sym-yield { font-family: monospace; font-weight: 700; font-size: 11px; color: #000; margin-left: auto; padding-right: 8px; }
-      .sym-change { font-family: monospace; font-weight: 700; font-size: 10px; min-width: 55px; text-align: right; }
+      .sym-code { font-weight: 600; color: #000; width: 60px; flex-shrink: 0; }
+      .sym-yield { font-family: monospace; font-weight: 700; font-size: 13px; color: #000; margin-left: auto; padding-right: 4px; }
+      .sym-change { font-family: monospace; font-weight: 700; font-size: 12px; min-width: 60px; text-align: right; }
       .sym-change.up { color: #16a34a; }
       .sym-change.down { color: #dc2626; }
       #fetchStatus { font-size: 11px; color: #000; margin-top: 20px; font-weight: 700; }
@@ -118,7 +118,7 @@ function setupUI() {
     <div class="sym-group">
       <h4>TIPS <span class="clear-btn" data-type="TIPS">Clear All</span></h4>
       ${createGrid(tips)}
-      <h4>Nominal Treasuries <span class="clear-btn" data-type="Nominal">Clear All</span></h4>
+      <h4>Treasuries <span class="clear-btn" data-type="Nominal">Clear All</span></h4>
       ${createGrid(nominals)}
     </div>
     <div id="fetchStatus">Ready</div>
@@ -184,7 +184,7 @@ function syncChartContainers() {
       const card = document.createElement('div');
       card.className = 'chart-card';
       card.id = `card-${sym}`;
-      const groupLabel = sym.endsWith('TIPS') ? 'TIPS' : 'Nominal';
+      const groupLabel = sym.endsWith('TIPS') ? 'TIPS' : 'Treasury';
       const maturityLabel = SYMBOL_LABELS[sym] || sym;
       card.innerHTML = `
         <div class="chart-header">
@@ -316,6 +316,8 @@ function createChartInstance(sym) {
       }
     }
   });
+
+  setupAxisWheelZoom(ctx.canvas, charts[sym]);
 
   const container = document.getElementById(`card-${sym}`);
   new ResizeObserver(() => {

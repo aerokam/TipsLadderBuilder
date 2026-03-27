@@ -71,3 +71,26 @@ export function handleChartKeydown(e, chart, options = {}) {
     if (onAction) onAction({ chart });
   }
 }
+
+/**
+ * Adds modifier-key wheel zoom for independent axis control.
+ * - Ctrl + scroll  → zoom X axis only
+ * - Shift + scroll → zoom Y axis only
+ * Plain scroll is left to the chartjs-plugin-zoom wheel handler.
+ */
+export function setupAxisWheelZoom(canvas, chart) {
+  canvas.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.shiftKey) return; // let plugin handle plain scroll
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const factor = e.deltaY > 0 ? 1.1 : 0.9;
+
+    if (e.ctrlKey) {
+      chart.zoom({ x: factor });
+    } else {
+      chart.zoom({ y: factor });
+    }
+  }, { passive: false, capture: true });
+}
