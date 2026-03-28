@@ -32,9 +32,16 @@ function checkReleaseDate() {
   return false;
 }
 
-if (checkReleaseDate()) {
-  process.exit(0); // It's release day
+const isReleaseDay = checkReleaseDate();
+
+if (process.env.GITHUB_OUTPUT) {
+  fs.appendFileSync(process.env.GITHUB_OUTPUT, `is_release_day=${isReleaseDay}\n`);
+}
+
+if (isReleaseDay) {
+  console.log("Release day confirmed.");
 } else {
   console.log("Not a release day.");
-  process.exit(1); // Not release day
 }
+
+process.exit(0);

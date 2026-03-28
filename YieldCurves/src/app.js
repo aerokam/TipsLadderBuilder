@@ -1,6 +1,6 @@
 // Yield Curves — Frontend Logic
 import { yieldFromPrice } from '../../shared/src/bond-math.js';
-import { handleChartKeydown } from '../../shared/src/chart-keys.js';
+import { handleChartKeydown, setupAxisWheelZoom } from '../../shared/src/chart-keys.js';
 
 console.log("YieldCurves app.js loading...");
 
@@ -12,6 +12,17 @@ const FIDELITY_TREASURIES_URL = `${R2_BASE_URL}/Treasuries/FidelityTreasuries.cs
 const FIDELITY_TIPS_URL = `${R2_BASE_URL}/Treasuries/FidelityTips.csv`;
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Compute IQR-based clip bounds from a yield array.
+function iqrClipBounds(source) {
+  const sorted = [...source].sort((a, b) => a - b);
+  if (sorted.length < 4) return null;
+  const q1 = sorted[Math.floor(sorted.length * 0.25)];
+  const q3 = sorted[Math.floor(sorted.length * 0.75)];
+  const iqr = q3 - q1;
+  const fence = Math.max(1.0 * iqr, 0.5);
+  return { lo: q1 - fence, hi: q3 + fence };
+}
 
 // --- State ---
 let rawYieldsData = null;
@@ -757,18 +768,20 @@ function renderNominalsChart(fedBonds, fidBonds) {
   const allY = allPoints.map(d => d.y);
   let scaleY = allY;
   if (nominalsClipOutliers && allY.length >= 4) {
-    // Use Notes yields for IQR (outliers live in notes; bills/bonds widen IQR too much)
+    // Use Notes yields for IQR (outliers live in notes; bills/bonds widen IQR too much).
+    // Filter IQR source to positive yields only — near-maturity notes can show extreme
+    // negative YTM (e.g. -5%) when trading at a tiny premium with days to expiry.
+    // Only clip when Notes are visible — near-maturity Notes are the sole source of
+    // extreme negative YTM garbage. Without Notes, there's nothing to clip.
     const notesY = activeSeries.filter(s => s.label.includes('Notes')).flatMap(s => s.data).map(d => d.y);
-    const iqrSource = notesY.length >= 4 ? notesY : allY;
-    const sorted = [...iqrSource].sort((a, b) => a - b);
-    const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const iqr = q3 - q1;
-    const fence = Math.max(1.0 * iqr, 0.5);
-    const lo = q1 - fence, hi = q3 + fence;
-    const clipped = allY.filter(y => y >= lo && y <= hi);
-    const excludedFrac = (allY.length - clipped.length) / allY.length;
-    if (clipped.length > 0 && excludedFrac <= 0.05) scaleY = clipped;
+    const notesYPos = notesY.filter(y => y > 0);
+    if (notesYPos.length >= 4) {
+      const bounds = iqrClipBounds(notesYPos);
+      if (bounds) {
+        const clipped = allY.filter(y => y >= bounds.lo);
+        if (clipped.length > 0) scaleY = clipped;
+      }
+    }
   }
   const minYRaw = Math.min(...scaleY), maxYRaw = Math.max(...scaleY);
   const minY = Math.floor(minYRaw * 20) / 20;
@@ -847,6 +860,8 @@ function renderNominalsChart(fedBonds, fidBonds) {
     chart.options.scales.y.max = zoomToRestore.yMax;
     chart.update('none');
   }
+
+  setupAxisWheelZoom(chart.canvas, chart);
 
   document.getElementById('resetZoom').onclick = () => {
     savedZoom['treasuries'] = null;
@@ -1116,6 +1131,8 @@ function renderChart(fedBonds, brokerBonds) {
     chart.update('none');
   }
 
+  setupAxisWheelZoom(chart.canvas, chart);
+
   document.getElementById('resetZoom').onclick = () => {
     savedZoom['tips'] = null;
     chart.resetZoom('none');
@@ -1140,16 +1157,14 @@ function rescaleToVisible(chart) {
       if (!chart.isDatasetVisible(i) || !dataset.label.includes('Notes')) return;
       dataset.data.forEach(p => notesVisibleY.push(p.y));
     });
-    const iqrSource = notesVisibleY.length >= 4 ? notesVisibleY : allVisibleY;
-    const sorted = [...iqrSource].sort((a, b) => a - b);
-    const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const iqr = q3 - q1;
-    const fence = Math.max(1.0 * iqr, 0.5);
-    const lo = q1 - fence, hi = q3 + fence;
-    const clipped = allVisibleY.filter(y => y >= lo && y <= hi);
-    const excludedFrac = (allVisibleY.length - clipped.length) / allVisibleY.length;
-    if (clipped.length > 0 && excludedFrac <= 0.05) allVisibleY = clipped;
+    const notesVisibleYPos = notesVisibleY.filter(y => y > 0);
+    if (notesVisibleYPos.length >= 4) {
+      const bounds = iqrClipBounds(notesVisibleYPos);
+      if (bounds) {
+        const clipped = allVisibleY.filter(y => y >= bounds.lo);
+        if (clipped.length > 0) allVisibleY = clipped;
+      }
+    }
   }
 
   const visibleMinY = Math.min(...allVisibleY);

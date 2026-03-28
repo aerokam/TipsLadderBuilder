@@ -26,11 +26,12 @@ jobs:
         run: npm install
 
       - name: Check if today is a CPI Release Day
-        # If it's manual trigger (workflow_dispatch), skip the check and run anyway
+        id: check_release
         if: github.event_name != 'workflow_dispatch'
         run: node YieldCurves/scripts/checkReleaseDate.js
 
       - name: Run Update Script
+        if: github.event_name == 'workflow_dispatch' || steps.check_release.outputs.is_release_day == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
